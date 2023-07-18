@@ -235,7 +235,7 @@ def SFL_over_SA(rule_iid ,K, Group):
             #     args.local_lr = max(1e-3,args.local_lr)
             if (idx+1) % (args.num_users * 2) == 0: # 衰减步长 200
                 args.local_lr = args.local_lr * (0.98 ** ((idx+1) / (args.num_users * 2)))
-                args.local_lr = max(1e-3,args.local_lr)
+                args.local_lr = max(4e-3,args.local_lr)
             print(args.local_lr)
             #============================================
             clnt_models[clnt].train()

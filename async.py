@@ -260,6 +260,10 @@ def SFL_over_SA(rule_iid ,K, Group):
             # FL_AN.load_state_dict(AN_glob_client)
             #TODO:用FL_model做Client端？
 
+            if (idx+1) % (args.num_users * 2) == 0: # 衰减步长 200
+                args.local_lr = args.local_lr * (0.98 ** ((idx+1) / (args.num_users * 2)))
+                args.local_lr = max(4e-3,args.local_lr)
+            print(args.local_lr)
             iter += 1
 
         else:
