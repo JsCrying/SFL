@@ -40,7 +40,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     """
     1.read SA-GS connect data from csv total five days
     # """
-    data_csv = pd.read_csv('./sort_EndTime_SH_550km_5PLAN_40SAT_40days.csv')#按照EndTime排序
+    data_csv = pd.read_csv('./20SA_180DAY_endtime.csv')#按照EndTime排序
     # data_csv = pd.read_csv('./sort_EndTime_SH_550km_5PLAN_20SAT_60days.csv')
     data_csv = np.array(data_csv)
     # data_csv = np.array(data_csv[0:40])#实验中只取400
