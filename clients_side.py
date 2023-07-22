@@ -88,7 +88,7 @@ class Client(object):
             fx.backward(smashed_data_AN)
 
             #TODO:验证一下local model是否update了
-            torch.nn.utils.clip_grad_norm_(parameters=net.parameters(), max_norm= 1)#10 #5,3
+            torch.nn.utils.clip_grad_norm_(parameters=net.parameters(), max_norm= 3)#10 #5,3
             optimizer_client.step()
                             
             # print("'Client ID: %.3d', 'loc_ep: %.3d','Client LR: %.4f'" %(self.idx, iter, scheduler.get_lr()[0]))                
@@ -181,7 +181,7 @@ class Client(object):
         loss_AN.backward()
         smashed_data_AN = smashed_data.grad.clone().detach() #计算了张量的梯度和副本
 
-        torch.nn.utils.clip_grad_norm_(parameters=net_AN.parameters(), max_norm=1)#10,5,3
+        torch.nn.utils.clip_grad_norm_(parameters=net_AN.parameters(), max_norm=3)#10,5,3
         optimizer_AN.step()
         # print("'LOCAL AN LR: %.4f'" %(self.lr))
         

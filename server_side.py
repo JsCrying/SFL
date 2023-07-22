@@ -196,7 +196,7 @@ def train_server(net_server,fx_client, y, device ,lr):
     #--------backward prop--------------
     loss.backward()
     dfx_client = fx_client.grad.clone().detach()
-    torch.nn.utils.clip_grad_norm_(parameters=net_server.parameters(), max_norm=1)#10,5,3
+    torch.nn.utils.clip_grad_norm_(parameters=net_server.parameters(), max_norm=3)#10,5,3
     optimizer_server.step()   
     # print("'Server-side LR: %.4f' "%(scheduler.get_lr()[0]))      
     #     
