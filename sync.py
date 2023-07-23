@@ -117,10 +117,9 @@ def SFL_over_SA(rule_iid ,K, Group):
         print('client model G2', init_net_client_G2)
 
 
-    clnt_smashed = [[] for i in range(args.num_users)]
-    clnt_glob_graditent = [[] for i in range(args.num_users)]
     AN_loss_train_list = [[] for i in range(args.num_users)]
     AN_acc_train_list = [[] for i in range(args.num_users)]
+    server_grads_list = [0 for i in range(args.num_users)]
        
     #%%----- Auxiliary Network ----
     AN_model_func = lambda: ANet_C4()#所有的辅助网络都是一样的
@@ -144,7 +143,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     if args.Group == 1:
         for clnt in user_id:#初始轮训分发
             #----load the global federated model------
-            clnt_models[clnt] =  clnt_model_func_G4().to(device)
+            clnt_models[clnt] = clnt_model_func_G4().to(device)
             clnt_models[clnt].load_state_dict(copy.deepcopy(dict(init_net_client_G4.named_parameters())))
             AN_net[clnt] = AN_model_func().to(device)
             AN_net[clnt].load_state_dict(copy.deepcopy(dict(init_local_AN.named_parameters())))
@@ -202,6 +201,12 @@ def SFL_over_SA(rule_iid ,K, Group):
     r_list = copy.deepcopy(user_id)   #记录待接收
     #如果没有新的更新就空转 ：防止不同的客户端训练频次不同，容易过拟合
     s_num = 0
+    sats = [Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
+                do_srv2clnt_grad = 0,
+                dataset_train=clnt_x[clnt], dataset_test=None,
+                idxs=clnt_y[clnt], idxs_test=None,
+                dataset_name=args.dataset)
+                for clnt in range(args.num_users)]
 
 
     #%%------按照星历表遍历----------------------------------------------------
@@ -246,9 +251,18 @@ def SFL_over_SA(rule_iid ,K, Group):
             for params in AN_net[clnt].parameters():
                 params.requires_grad = True
 
-            local = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt], dataset_train = clnt_x[clnt], dataset_test = None, idxs = clnt_y[clnt], 
-                            idxs_test = None, dataset_name = args.dataset) #测试集没有放在client
-            [w_client, AN_params,smashed_list, AN_loss_train, AN_acc_train] = local.train(net = copy.deepcopy(clnt_models[clnt].to(device)))
+            # server loss + client loss
+            if sats[clnt].do_grad(): # 1做结合/0不做结合
+                print('Do server+client update')
+                sats[clnt].srv2clnt_grad(server_grads_list[clnt])
+                server_grads_list[clnt] = 0
+            # Train Client
+            sats[clnt] = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
+                            do_srv2clnt_grad= 1 - sats[clnt].do_grad(),
+                            dataset_train = clnt_x[clnt], dataset_test = None,
+                            idxs = clnt_y[clnt], idxs_test = None,
+                            dataset_name = args.dataset) #测试集没有放在client
+            [w_client, AN_params, smashed_list, AN_loss_train, AN_acc_train] = sats[clnt].train(net = copy.deepcopy(clnt_models[clnt].to(device)))
 
             w_locals_client.append(copy.deepcopy(w_client))
             AN_loss_train_list[clnt].append(AN_loss_train)
@@ -262,12 +276,15 @@ def SFL_over_SA(rule_iid ,K, Group):
             #TODO: 对smahed_data做改进
             #TODO: server_train
             #TODO：用户记录最后一个batch的smashed_data， labels                             
-            #TODO: 10张10张输入而不是60*10张一起输入      
+            #TODO: 10张10张输入而不是60*10张一起输入
+            # Train Server
+            server_grads = []
             for smashed_labels in smashed_list:#长度为64*20 即local_bs*local_ep
                 smashed_data = smashed_labels[0]
                 local_labels = smashed_labels[1]
-                [global_gradient, net_server_update] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
-                clnt_glob_graditent[clnt] = global_gradient #最后一次的梯度
+                [net_server_update, server_grad] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
+                server_grads.append(server_grad)
+                server_grads_list[clnt] = server_grads # 地面站反向给clnt的smashed data的梯度
                 net_server = copy.deepcopy(net_server_update) #有更新，但是很慢
 
             #TODO: 测试 FL_model + server_model            

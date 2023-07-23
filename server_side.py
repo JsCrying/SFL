@@ -166,7 +166,7 @@ def calculate_accuracy_CPU(fx, y):
     return acc_bs
 
 #TODO： Server-side function associated with Training 给每一个用户都分配一个server
-def train_server(net_server,fx_client, y, device ,lr):
+def train_server(net_server, fx_client, y, device, lr):
   
     net_server = net_server.to(device)
     net_server.train()
@@ -206,7 +206,7 @@ def train_server(net_server,fx_client, y, device ,lr):
     for params in net_server.parameters():
         params.required_grad = False
 
-    return dfx_client , net_server
+    return net_server, dfx_client
 
 
 def evaluate_server_V2(fx_client, y, net_server, device):
