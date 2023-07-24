@@ -109,12 +109,13 @@ class ANet_C4(nn.Module):
 
         # self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
         input_dim: int = 384 * 6 * 6
-        self.layer_1 = nn.Linear(input_dim, 200)
-        self.layer_2 = nn.Linear(input_dim, num_classes)
+        intermediate_channel: int = 256 * 6
+        self.layer_1 = nn.Linear(input_dim, intermediate_channel)
+        self.layer_2 = nn.Linear(intermediate_channel, num_classes)
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
         x = x.view(-1, x.shape[1]*x.shape[2]*x.shape[3])
-        # x = self.layer_1(x)
+        x = self.layer_1(x)
         x = self.layer_2(x)
         return x
 

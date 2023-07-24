@@ -26,8 +26,9 @@ class DatasetSplit(Dataset):
 
 # Client-side functions associated with Training and Testing
 class Client(object):
-    def __init__(self, args, clnt_model, idx, device, AN_net, do_srv2clnt_grad, dataset_train = None, dataset_test = None, idxs = None, idxs_test = None, dataset_name = 'CIFAR10'):
-        args = args
+    def __init__(self, args, clnt_model, idx, device, AN_net, do_srv2clnt_grad,
+                 dataset_train = None, dataset_test = None, idxs = None, idxs_test = None, dataset_name = 'CIFAR10'):
+        self.args = args
         self.clnt_model = clnt_model
         self.idx = idx
         self.lr = args.local_lr
@@ -52,6 +53,8 @@ class Client(object):
 
     def do_grad(self):
         return self.do_srv2clnt_grad
+    def reset_do_grad(self):
+        self.do_srv2clnt_grad = self.args.num_users
 
     def srv2clnt_grad(self, server_grads):
         self.net.train() ; self.net = self.net.to(self.device)
@@ -63,7 +66,7 @@ class Client(object):
             zip(self.fxs, self.AN_grads, server_grads):
             self.optimizer_client.zero_grad()
             fx.backward(server_grad)
-            torch.nn.utils.clip_grad_norm_(parameters=self.net.parameters(), max_norm=3)  # 10 #5,3
+            torch.nn.utils.clip_grad_norm_(parameters=self.net.parameters(), max_norm=1)  # 10 #5,3
             self.optimizer_client.step()
         self.fxs = []
         self.AN_grads = []
@@ -109,14 +112,14 @@ class Client(object):
                 self.fxs.append(fx)
                 self.AN_grads.append(smashed_data_AN)
             #---client local update---
-            if 1 - self.do_srv2clnt_grad:
+            if self.do_srv2clnt_grad:
                 fx.backward(smashed_data_AN)
                 #TODO:验证一下local model是否update了
-                torch.nn.utils.clip_grad_norm_(parameters=self.net.parameters(), max_norm= 3)#10 #5,3
+                torch.nn.utils.clip_grad_norm_(parameters=self.net.parameters(), max_norm= 1)#10 #5,3
                 self.optimizer_client.step()
                             
             # print("'Client ID: %.3d', 'loc_ep: %.3d','Client LR: %.4f'" %(self.idx, iter, scheduler.get_lr()[0]))
-        if 1 - self.do_srv2clnt_grad:
+        if self.do_srv2clnt_grad:
             self.scheduler.step()
 
         #Freeze model
@@ -156,7 +159,7 @@ class Client(object):
         loss_AN.backward()
         smashed_data_AN = smashed_data.grad.clone().detach() #计算了张量的梯度和副本
 
-        torch.nn.utils.clip_grad_norm_(parameters=net_AN.parameters(), max_norm=3)#10,5,3
+        torch.nn.utils.clip_grad_norm_(parameters=net_AN.parameters(), max_norm=1)#10,5,3
         optimizer_AN.step()
         # print("'LOCAL AN LR: %.4f'" %(self.lr))
         
