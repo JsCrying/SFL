@@ -15,6 +15,7 @@ from utils_general import *
 from utils_args import args_parser
 from clients_side import *
 from server_side import *
+import math
 
   
 from tensorboardX import SummaryWriter
@@ -40,7 +41,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     """
     1.read SA-GS connect data from csv total five days
     # """
-    data_csv = pd.read_csv('./20SA_180DAY_endtime.csv')#按照EndTime排序
+    data_csv = pd.read_csv('./20SA_120DAY_endtime.csv')#按照EndTime排序
     # data_csv = pd.read_csv('./sort_EndTime_SH_550km_5PLAN_20SAT_60days.csv')
     data_csv = np.array(data_csv)
     # data_csv = np.array(data_csv[0:40])#实验中只取400
@@ -96,7 +97,9 @@ def SFL_over_SA(rule_iid ,K, Group):
     
     torch.manual_seed(37)
     init_net_client_G4 = clnt_model_func_G4()
+    load_pretrained(init_net_client_G4, {0: 0}, 'features')
     init_net_client_G2 = clnt_model_func_G2()
+    load_pretrained(init_net_client_G2, {8: 3}, 'features')
     #TODO:check 两层网络是否参数和四层网络的后两层一致
     clnt_models = list(range(args.num_users))
     FL_model = clnt_model_func_G4() #取较大网络模型
@@ -129,6 +132,12 @@ def SFL_over_SA(rule_iid ,K, Group):
     #%%----- Split model Server side----
     torch.manual_seed(37)
     net_server = AlexNet_server_side_C4()
+    if args.Group == 1:
+        load_pretrained(net_server, {3:0, 6:4, 8:6, 10:8}, 'features')
+        load_pretrained(net_server, {1:1, 4:4}, 'classifiers')
+    elif args.Group == 2:
+        load_pretrained(net_server, {10:0}, 'features')
+        load_pretrained(net_server, {1:1, 4:4}, 'classifiers')
     net_server.to(device)
 
     #---- Server side Arguments-----
@@ -136,6 +145,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     FL_acc = []
     FL_loss_trn = []
     FL_acc_trn = []
+    recv_iter_list = []
     w_locals_client = []
 
     #%%---- 方案1：所有用户都分割一样的4层网络------
@@ -193,7 +203,16 @@ def SFL_over_SA(rule_iid ,K, Group):
     FL_loss.append(loss_tst)
     saved_itr +=1
     writer.add_scalars('Accuracy/Test',    {'All Clients': FL_acc[saved_itr]   }, 0)
-    writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, 0 )  
+    writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, 0 )
+
+    server_iter = 0
+    do_grad_top = args.num_users
+    sats = [Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
+                do_srv2clnt_grad = do_grad_top,
+                dataset_train = clnt_x[clnt], dataset_test = None,
+                idxs = clnt_y[clnt], idxs_test = None,
+                dataset_name = args.dataset)
+                for clnt in range(args.num_users)]
 
     #%%------按照星历表遍历----------------------------------------------------
     for idx, clnt in enumerate(user_list):    #按照星历表遍历       
@@ -216,10 +235,14 @@ def SFL_over_SA(rule_iid ,K, Group):
         for params in AN_net[clnt].parameters():
             params.requires_grad = True
 
-        local = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt], dataset_train = clnt_x[clnt], dataset_test = None, idxs = clnt_y[clnt], 
+        sats[clnt] = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
+                        recv_iter = sats[clnt].recv_iter,
+                        do_srv2clnt_grad = do_grad_top,
+                        dataset_train = clnt_x[clnt], dataset_test = None, idxs = clnt_y[clnt],
                         idxs_test = None, dataset_name = args.dataset) #测试集没有放在client
-        [w_client, AN_params,smashed_list, AN_loss_train, AN_acc_train] = local.train(net = copy.deepcopy(clnt_models[clnt].to(device)))
+        [w_client, AN_params, smashed_list, AN_loss_train, AN_acc_train] = sats[clnt].train(net = copy.deepcopy(clnt_models[clnt].to(device)))
 
+        recv_iter_list.append(sats[clnt].recv_iter)
         w_locals_client.append(copy.deepcopy(w_client))
         AN_loss_train_list[clnt].append(AN_loss_train)
         AN_acc_train_list[clnt].append(AN_acc_train)
@@ -236,9 +259,10 @@ def SFL_over_SA(rule_iid ,K, Group):
         for smashed_labels in smashed_list:#长度为64*20 即local_bs*local_ep
             smashed_data = smashed_labels[0]
             local_labels = smashed_labels[1]
-            [global_gradient, net_server_update] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
+            [net_server_update, global_gradient] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
             clnt_glob_graditent[clnt] = global_gradient #最后一次的梯度
             net_server = copy.deepcopy(net_server_update) #有更新，但是很慢
+        server_iter = server_iter + 1
 
         #TODO: 测试 FL_model + server_model               
         if len(w_locals_client) >= args.K:             #iter%2==0,5,10
@@ -248,9 +272,10 @@ def SFL_over_SA(rule_iid ,K, Group):
                 FL_G4_params, FL_G2_params = FedBuff_del_inputlayer(w_old,w_locals_client, args.async_lr)
                  
             elif args.Group == 1:
-                FL_G4_params = FedBuff(w_old, w_locals_client, args.async_lr) 
-
+                # FL_G4_params = FedBuff(w_old, w_locals_client, args.async_lr)
+                FL_G4_params = FedAsyncPoly(w_old, w_locals_client, recv_iter_list, server_iter, args)
             #清除Buff-----------------------------
+            recv_iter_list = []
             w_locals_client = []
             FL_model.load_state_dict(FL_G4_params) #只对客户端模型做FL
             if args.Group == 2 and FL_G2_params != 0:
@@ -260,9 +285,9 @@ def SFL_over_SA(rule_iid ,K, Group):
             # FL_AN.load_state_dict(AN_glob_client)
             #TODO:用FL_model做Client端？
 
-            if (idx+1) % (args.num_users * 2) == 0: # 衰减步长 200
-                args.local_lr = args.local_lr * (0.98 ** ((idx+1) / (args.num_users * 2)))
-                args.local_lr = max(4e-3,args.local_lr)
+            if (idx + 1) % (args.num_users) == 0:  # 衰减步长 200
+                args.local_lr = args.local_lr * (0.992 ** (4.0 * pow((idx + 1) / (args.num_users), 1.0 / 8.0)))
+                args.local_lr = max(2e-3, args.local_lr)
             print(args.local_lr)
             iter += 1
 
@@ -289,8 +314,8 @@ def SFL_over_SA(rule_iid ,K, Group):
         FL_loss.append(loss_tst)
         saved_itr +=1
         writer.add_scalars('Accuracy/Test',    {'All Clients': FL_acc[saved_itr]   },clnt_endtime)
-        writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, clnt_endtime)  
-
+        writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, clnt_endtime)
+        writer.add_scalars('LR', {'All Clients': args.local_lr}, clnt_endtime)
         #%%---------------------------------回传-------------------------------------------------
         # Freeze model
         for params in FL_model.parameters():
@@ -304,32 +329,16 @@ def SFL_over_SA(rule_iid ,K, Group):
 
             elif clnt in idx_G2:
                 clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_G2.named_parameters())))
-          
         elif args.Group == 1:
-                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))  
+                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))
+        sats[clnt].recv_iter = server_iter
 
-    #%----------------------记录---------------------------------------------------------------
-    if rule_iid == 'iid':
-        file_tmp = 'cifar/40_iid_cifar_async_K/'
-        if (not os.path.exists('save/%s' %(file_tmp))):
-            os.makedirs('save/%s' %(file_tmp))            
-    elif rule_iid == 'Noniid':
-        file_tmp = 'cifar/40_Noniid_cifar_async_K/'
-        if (not os.path.exists('save/%s' %(file_tmp))):
-            os.makedirs('save/%s' %(file_tmp))
-    file_name = 'save/' + file_tmp + 'SFL_acc_' + str(args.K) + '_' + str(args.async_lr)
-    write_info_to_txt(FL_acc, file_name)
-    file_name = 'save/' + file_tmp + 'SFL_loss_' + str(args.K) + '_' + str(args.async_lr)
-    write_info_to_txt(FL_loss, file_name)
-    file_name = 'save/' + file_tmp + 'SFL_acc_trn_' + str(args.K) + '_' + str(args.async_lr)
-    write_info_to_txt(FL_acc_trn, file_name)
-    file_name = 'save/' + file_tmp + 'SFL_loss_trn_' + str(args.K) + '_' + str(args.async_lr)
-    write_info_to_txt(FL_loss_trn, file_name)
+        if idx % 2000 == 0:
+            record(FL_acc, FL_loss, FL_acc_trn, FL_loss_trn, args, rule_iid)
 
-    #==========================================   
-    print("Training and Evaluation completed!")    
-
-
+    record(FL_acc, FL_loss, FL_acc_trn, FL_loss_trn, args, rule_iid)
+                # ==========================================
+    print("Training and Evaluation completed!")
 
 #%%--------Main-------------------------------------
 #===================================================s
@@ -343,11 +352,11 @@ if __name__  == '__main__':
     #         for K in [5]:
     #             SFL_over_SA(rule_iid, K, Group_type)
 
-    for Group_type in [1, 2]:
+    for Group_type in [1]:
         for rule_iid in ['iid']:
             for K in [1]:
                 SFL_over_SA(rule_iid, K, Group_type)
         for rule_iid in ['iid']:
-            for K in [40]:
+            for K in [10]:
                 SFL_over_SA(rule_iid, K, Group_type)
     print('wait for check!')

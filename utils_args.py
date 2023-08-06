@@ -20,13 +20,16 @@ def args_parser():
     parser.add_argument('--num_users', type = int, default = 20, help = 'the number of clients')
     parser.add_argument('--global_iters', type = int, default = 50, help = 'global rounds/epochs ')
     # parser.add_argument('--global_lr', type = float, default = 0.1, help = 'global learning rate for aggregation')
-    parser.add_argument('--local_lr', type = float, default = 0.1, help = 'the learning rate for both users and server net training')
+    init_lr = 0.1
+    parser.add_argument('--init_lr', type= float, default= init_lr, help='记录初始学习率')
+    parser.add_argument('--local_lr', type = float, default = init_lr, help = 'the learning rate for both users and server net training')
     parser.add_argument('--local_bs', type = int, default = 32, help = 'local batch size for once training')
     parser.add_argument('--local_ep', type = int, default = 64, help = 'loal epoch each training')#60
     parser.add_argument('--local_Epoch',type = int, default = 5, help ='local Epochs')
     # parser.add_argument('--bs', type = float, default = 2000, help = 'test batch size')
     # parser.add_argument('--momentum', type = float, default = 0, help = 'the local SGD training momentum')设置了momentum = 0
-
+    parser.add_argument('--diff_lr', type=float, default=80.0, help='差异化client&server学习率的倍数')
+    parser.add_argument('--poly_deg', type=float, default=-4.0, help='异步聚合考虑陈旧性，使用的多项式次数')
 
 
 # max_norm = 1

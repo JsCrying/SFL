@@ -5,6 +5,8 @@ import copy
 from server_side import *
 from torch.utils import data
 
+import sys
+
 #==============================================================================================================
 #                                       Clients-side Program
 #==============================================================================================================
@@ -26,12 +28,12 @@ class DatasetSplit(Dataset):
 
 # Client-side functions associated with Training and Testing
 class Client(object):
-    def __init__(self, args, clnt_model, idx, device, AN_net, do_srv2clnt_grad,
+    def __init__(self, args, clnt_model, idx, device, AN_net, recv_iter=0, do_srv2clnt_grad=1,
                  dataset_train = None, dataset_test = None, idxs = None, idxs_test = None, dataset_name = 'CIFAR10'):
         self.args = args
         self.clnt_model = clnt_model
         self.idx = idx
-        self.lr = args.local_lr
+        self.lr = args.local_lr / args.diff_lr # 差异化与server LR
         self.local_ep = args.local_ep
         self.device = device
         self.AN_net = AN_net
@@ -51,10 +53,12 @@ class Client(object):
         self.fxs = []
         self.AN_grads = []
 
+        self.recv_iter = recv_iter # 收到来自server模型的服务器周期
+
     def do_grad(self):
         return self.do_srv2clnt_grad
-    def reset_do_grad(self):
-        self.do_srv2clnt_grad = self.args.num_users
+    def reset_do_grad(self, reset):
+        self.do_srv2clnt_grad = reset
 
     def srv2clnt_grad(self, server_grads):
         self.net.train() ; self.net = self.net.to(self.device)
@@ -111,8 +115,7 @@ class Client(object):
             if self.do_srv2clnt_grad:
                 self.fxs.append(fx)
                 self.AN_grads.append(smashed_data_AN)
-            #---client local update---
-            if self.do_srv2clnt_grad:
+                #---client local update---
                 fx.backward(smashed_data_AN)
                 #TODO:验证一下local model是否update了
                 torch.nn.utils.clip_grad_norm_(parameters=self.net.parameters(), max_norm= 1)#10 #5,3
@@ -144,9 +147,13 @@ class Client(object):
         optimizer_AN.zero_grad()
         smashed_data = smashed_data.to(self.device)
         labels = labels.to(self.device)
-
+        # file = open('output.txt', 'w+')
+        # sys.stdout = file
+        # print(f'before train: {smashed_data.grad}')
         #---forward prop----
         fx_AN = net_AN(smashed_data)
+        # print(f'after train: {smashed_data.grad}')
+
 
         #---calculate loss---
         loss_AN = loss_AN_fn(fx_AN+1e-8, labels.reshape(-1).long())
@@ -158,6 +165,13 @@ class Client(object):
         #---backward prop----
         loss_AN.backward()
         smashed_data_AN = smashed_data.grad.clone().detach() #计算了张量的梯度和副本
+        # print(f'after backward back shape: {smashed_data_AN.shape}')
+        # print(f'after backward, back: {smashed_data_AN}')
+        # print(f'after backward smashed_data.grad shape: {smashed_data.grad.shape}')
+        # print(f'after backward, smashed_data.grad: {smashed_data.grad}')
+        # print(f'sub: {smashed_data_AN-smashed_data.grad}')
+        # file.close()
+        # exit(0)
 
         torch.nn.utils.clip_grad_norm_(parameters=net_AN.parameters(), max_norm=1)#10,5,3
         optimizer_AN.step()

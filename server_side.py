@@ -5,6 +5,7 @@ from utils_general import *
 from torch.utils.data import DataLoader
 from utils_dataset import Dataset
 # import torch.optim.lr_scheduler as lr_scheduler
+import sys
 
 #%%-----Server side----
 # Federated averaging: FedAvg
@@ -16,15 +17,41 @@ def FedAvg(w):
         w_avg[k] = torch.div(w_avg[k], len(w))#除法
     return w_avg
 
+def FedAsyncPoly(w_old, w_delta, recv_list, server_iter, args):
+    w_buff = copy.deepcopy(w_old)
+    for i in range(len(recv_list)):
+        lr = args.async_lr * pow(1 + server_iter - recv_list[i], args.poly_deg)
+        for k in w_delta[0].keys():
+            w_buff[k] = torch.mul(w_buff[k], 1-lr) + torch.mul(w_delta[i][k], lr)
+    return w_buff
+
 def FedBuff(w_old,w_delta,lr):
     w_buff = copy.deepcopy(w_old)
+    # print(f'w_buff size: {w_buff.size()}')
+    # file = open('w_buff.txt', 'w+')
+    # sys.stdout = file
+    # print(f'w_buff: {w_buff}')
+    # file.close()
+    # file = open('w_delta.txt', 'w+')
+    # sys.stdout = file
+    # print(f'w_delta: {w_delta}')
+    # file.close()
     w_avg_delta = copy.deepcopy(w_delta[0])
+    # file = open('w_avg_delta.txt', 'w+')
+    # sys.stdout = file
+    # print(f'w_avg_delta: {w_avg_delta}')
+    # file.close()
+    # file = open('w_avg_delta_keys.txt', 'w+')
+    # sys.stdout = file
+    # print(f'w_avg_delta_keys: {w_avg_delta.keys()}')
+    # file.close()
     for k in w_avg_delta.keys():
         for i in range(1,len(w_delta)):
             w_avg_delta[k] += w_delta[i][k]
         w_avg_delta[k] = torch.div(w_avg_delta[k],len(w_delta))
         w_buff[k] = torch.mul(w_buff[k],(1-lr)) + torch.mul(w_avg_delta[k],lr)
     #len=K=10,lr=1时候为同步
+    # exit(0)
     return w_buff            
 
 

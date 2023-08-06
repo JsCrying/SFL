@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torchvision.models as models
 import torch.nn.functional as F
 
 import random
@@ -16,6 +17,12 @@ class AlexNet_server_side_C4(nn.Module):
     def __init__(self, num_classes: int = 10, dropout: float = 0.5):
         super(AlexNet_server_side_C4,self).__init__()
         self.features = nn.Sequential(
+            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.AdaptiveAvgPool2d((6, 6)),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
             nn.Conv2d(384, 256, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
@@ -48,13 +55,6 @@ class AlexNet_client_side_C4(nn.Module):
             nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
-
-            nn.Conv2d(64, 192, kernel_size=5, padding=2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-
-            nn.Conv2d(192, 384, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
             )
 
         self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
@@ -108,15 +108,12 @@ class ANet_C4(nn.Module):
         # input_dim: int = 6912
 
         # self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
-        input_dim: int = 384 * 6 * 6
-        intermediate_channel: int = 256 * 6
-        self.layer_1 = nn.Linear(input_dim, intermediate_channel)
-        self.layer_2 = nn.Linear(intermediate_channel, num_classes)
+        input_dim: int = 64 * 6 * 6
+        self.layer_1 = nn.Linear(input_dim, num_classes)
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
         x = x.view(-1, x.shape[1]*x.shape[2]*x.shape[3])
         x = self.layer_1(x)
-        x = self.layer_2(x)
         return x
 
 # class ANet(nn.Module):
@@ -144,3 +141,30 @@ class FFC_C2(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)#输出[10,256,32,32]
         return x   # output [10,9216]
+
+def load_pretrained(net, layer, part: str = 'features'):
+    alexnet = models.alexnet(pretrained=True)
+    state_dict = alexnet.state_dict()
+
+    def wrap(k, layer):  # 名称一致: 在预训练这里是8: 在自己这里是3
+        k = k.split('.')
+        k[1] = str(layer[int(k[1])])
+        return '.'.join(k)
+    pretrained_dict = {
+        wrap(k, layer): v for k, v in state_dict.items() if part in k
+                                               and int(k.split('.')[1]) in layer.keys()
+    }
+    net_dict = net.state_dict()
+    net_dict.update(pretrained_dict)
+    net.load_state_dict(net_dict)
+
+    ''' 
+        Client:
+        features_1_4: [8]
+        features_1_2_3: [0, 3, 6]
+        features_1_2_3_4: [0, 3, 6, 8]
+        Server:
+        features_5: [10], classifier: [1, 4]
+        features_4_5: [8, 10], classifier: [1, 4]
+        最后一个线性层输出通道不同，因此不用预训练
+    '''
