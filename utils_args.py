@@ -20,7 +20,7 @@ def args_parser():
     parser.add_argument('--num_users', type = int, default = 20, help = 'the number of clients')
     parser.add_argument('--global_iters', type = int, default = 50, help = 'global rounds/epochs ')
     # parser.add_argument('--global_lr', type = float, default = 0.1, help = 'global learning rate for aggregation')
-    init_lr = 0.1
+    init_lr = 0.04
     parser.add_argument('--init_lr', type= float, default= init_lr, help='记录初始学习率')
     parser.add_argument('--local_lr', type = float, default = init_lr, help = 'the learning rate for both users and server net training')
     parser.add_argument('--local_bs', type = int, default = 64, help = 'local batch size for once training')

@@ -170,7 +170,7 @@ def FedBuff_del_inputlayer(w_old,w_delta,lr):
                 w_avg_G2[keys_list[j-4]] = w_buff[k]
         FL_G4 = w_buff
         FL_G2 = w_avg_G2
-        return FL_G4, FL_G2
+        return FL_G2, FL_G4
 
 
 
