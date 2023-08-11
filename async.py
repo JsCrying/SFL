@@ -103,6 +103,8 @@ def SFL_over_SA(rule_iid ,K, Group):
     init_net_client_diff_1 = []
     init_net_client_diff_2 = []
     FL_model = []
+    FL_diff_1 = []
+    FL_diff_2 = []
     AN_model_func = []
     net_server = []
 
@@ -265,17 +267,15 @@ def SFL_over_SA(rule_iid ,K, Group):
             # TODO
             if args.Group == 1:
                 w_old = copy.deepcopy(FL_model.to(device).state_dict()) 
-                # FL_diff_1_params = FedBuff(w_old, w_locals_client, args.async_lr)
-                FL_diff_params = FedAsyncPoly(w_old, w_locals_client, recv_iter_list, server_iter, args)
+                FL_params = FedAsyncPoly(w_old, w_locals_client, recv_iter_list, server_iter, args)
             elif args.Group == 2:
-                # w_old_1 = copy.deepcopy(FL_diff_1.to(device).state_dict()) 
                 w_old = copy.deepcopy(FL_diff_2.to(device).state_dict()) 
                 FL_diff_1_params, FL_diff_2_params = FedBuff_del_inputlayer(w_old, w_locals_client, args.async_lr)
             #清除Buff-----------------------------
             recv_iter_list = []
             w_locals_client = []
             if args.Group == 1:
-                FL_model.load_state_dict(FL_diff_params) #只对客户端模型做FL
+                FL_model.load_state_dict(FL_params) #只对客户端模型做FL
             elif args.Group == 2 and FL_diff_2_params != 0:
                 FL_diff_1.load_state_dict(FL_diff_1_params)
                 FL_diff_2.load_state_dict(FL_diff_2_params)  
