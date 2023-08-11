@@ -65,6 +65,7 @@ class Client(object):
         # optimizer_client = torch.optim.Adam(net.parameters(), lr = self.lr)
         self.optimizer_client = torch.optim.SGD(self.net.parameters(), lr = self.lr, weight_decay = 1e-3, momentum = 0.9) #0.9 client_momentum = 0 比较好，但前期差异也没有很大
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer_client, step_size = 1, gamma = 1)
+        # self.scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max=5)
 
         for fx, AN_grad, server_grad in \
             zip(self.fxs, self.AN_grads, server_grads):
@@ -89,12 +90,11 @@ class Client(object):
         # optimizer_client = torch.optim.Adam(net.parameters(), lr = self.lr) 
         self.optimizer_client = torch.optim.SGD(self.net.parameters(), lr = self.lr, weight_decay = 1e-3, momentum = 0.9) #0.9 client_momentum = 0 比较好，但前期差异也没有很大
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer_client, step_size = 1, gamma = 1)
-
+        # self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_client, T_max=5)
         #----- core training--------
         self.net.train()
-        trn_gene_iter = self.ldr_train.__iter__()
         smashed_list = []
-
+        trn_gene_iter = self.ldr_train.__iter__()
         for iter in range(self.local_ep): #以batch_zize为一次迭代
             images, labels = trn_gene_iter.__next__()
             images, labels = images.to(self.device), labels.to(self.device)
@@ -120,8 +120,8 @@ class Client(object):
                 #TODO:验证一下local model是否update了
                 torch.nn.utils.clip_grad_norm_(parameters=self.net.parameters(), max_norm= 1)#10 #5,3
                 self.optimizer_client.step()
-                            
-            # print("'Client ID: %.3d', 'loc_ep: %.3d','Client LR: %.4f'" %(self.idx, iter, scheduler.get_lr()[0]))
+                                
+                # print("'Client ID: %.3d', 'loc_ep: %.3d','Client LR: %.4f'" %(self.idx, iter, scheduler.get_lr()[0]))
         if self.do_srv2clnt_grad:
             self.scheduler.step()
 

@@ -27,6 +27,7 @@ class AlexNet_server_side_C4(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=dropout),
             nn.Conv2d(256, 192, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
@@ -110,8 +111,8 @@ class ANet_C4(nn.Module):
         # input_dim: int = 6912
 
         # self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
-        input_dim: int = 64 * 6 * 6
-        self.layer_1 = nn.Linear(input_dim, num_classes)
+        dim_1: int = 64 * 6 * 6
+        self.layer_1 = nn.Linear(dim_1, num_classes)
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
         x = x.view(-1, x.shape[1]*x.shape[2]*x.shape[3])

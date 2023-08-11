@@ -201,6 +201,7 @@ def train_server(net_server, fx_client, y, device, lr):
     optimizer_server = torch.optim.SGD(net_server.parameters(), lr = lr, weight_decay = 1e-3, momentum = 0.9)#0.9
     criterion = nn.CrossEntropyLoss(reduction='sum')
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer_server, step_size = 1, gamma = 0.9)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_server, T_max=5)
 
     # train and update
     optimizer_server.zero_grad()

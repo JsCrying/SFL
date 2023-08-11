@@ -41,7 +41,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     """
     1.read SA-GS connect data from csv total five days
     # """
-    data_csv = pd.read_csv('./20SA_120DAY_endtime.csv')#按照EndTime排序
+    data_csv = pd.read_csv('./20SA_60DAY_endtime.csv')#按照EndTime排序
     # data_csv = pd.read_csv('./sort_EndTime_SH_550km_5PLAN_20SAT_60days.csv')
     data_csv = np.array(data_csv)
     # data_csv = np.array(data_csv[0:40])#实验中只取400
@@ -256,7 +256,7 @@ def SFL_over_SA(rule_iid ,K, Group):
         #TODO: server_train
         #TODO：用户记录最后一个batch的smashed_data， labels                             
         #TODO: 10张10张输入而不是60*10张一起输入      
-        for smashed_labels in smashed_list:#长度为64*20 即local_bs*local_ep
+        for smashed_labels in smashed_list:#长度为64*32 即local_bs*local_ep
             smashed_data = smashed_labels[0]
             local_labels = smashed_labels[1]
             [net_server_update, global_gradient] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
@@ -287,7 +287,7 @@ def SFL_over_SA(rule_iid ,K, Group):
 
             if (idx + 1) % (args.num_users) == 0:  # 衰减步长 200
                 args.local_lr = args.local_lr * (0.992 ** (4.0 * pow((idx + 1) / (args.num_users), 1.0 / 8.0)))
-                args.local_lr = max(2e-3, args.local_lr)
+                args.local_lr = max(1e-3, args.local_lr)
             print(args.local_lr)
             iter += 1
 
