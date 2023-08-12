@@ -1,5 +1,7 @@
 import torch
 import copy
+import math
+from collections import OrderedDict
 from torch import nn
 from utils_general import *
 from torch.utils.data import DataLoader
@@ -20,159 +22,156 @@ def FedAvg(w):
 def FedAsyncPoly(w_old, w_delta, recv_list, server_iter, args):
     w_buff = copy.deepcopy(w_old)
     for i in range(len(recv_list)):
-        lr = args.async_lr * pow(1 + server_iter - recv_list[i], args.poly_deg)
+        # lr = args.async_lr * pow(1 + server_iter - recv_list[i], args.poly_deg)
+        lr = args.async_lr * math.exp(2.0 * (recv_list[i] - server_iter))
         for k in w_delta[0].keys():
             w_buff[k] = torch.mul(w_buff[k], 1-lr) + torch.mul(w_delta[i][k], lr)
     return w_buff
 
+def FedAsyncPoly_diff(w_old_1, w_old_2, w_delta, recv_list, server_iter, args):
+    # 不同分割模型对应的参数量
+    params_1 = 4
+    params_2 = 8
+    # w_delta 里不同分割模型归类的索引
+    idx_1 = [i for i in range(len(w_delta)) if len(w_delta[i]) == params_1]
+    idx_2 = [i for i in range(len(w_delta)) if len(w_delta[i]) == params_2]
+
+    # 切割模型分为 各自层 + 公共层（两种模型里都是最后一层）
+    w_delta_1 = [
+        {item:w_delta[i][item] for item in (list(OrderedDict(w_delta[i]))[:-2])} for i in idx_1
+    ]
+    w_delta_2 = [
+        {item:w_delta[i][item] for item in (list(OrderedDict(w_delta[i]))[:-2])} for i in idx_2
+    ]
+    w_delta_common = []
+
+    # 聚合各自层
+    w_buff_1 = copy.deepcopy(w_old_1)
+    w_buff_2 = copy.deepcopy(w_old_2)
+    recv_list_1 = [recv_list[i] for i in idx_1]
+    recv_list_2 = [recv_list[i] for i in idx_2]
+    if len(w_delta_1):
+        w_buff_1 = FedAsyncPoly(w_old_1, w_delta_1, recv_list_1, server_iter, args)
+    if len(w_delta_2):
+        w_buff_2 = FedAsyncPoly(w_old_2, w_delta_2, recv_list_2, server_iter, args)
+    
+    # 算力差异，按比例贡献公共层
+    percent = [0.5, 4.0]
+    for i in range(len(w_delta)):
+        p = 1.0
+        if i in idx_1:
+            p = percent[0]
+        elif i in idx_2:
+            p = percent[1]
+        w_delta[i][list(OrderedDict(w_delta[i]))[-2]] = torch.mul(w_delta[i][list(OrderedDict(w_delta[i]))[-2]], p)
+        w_delta[i][list(OrderedDict(w_delta[i]))[-1]] = torch.mul(w_delta[i][list(OrderedDict(w_delta[i]))[-1]], p)
+
+    # 聚合公共层
+    # 参数名称统一
+    if len(idx_1):
+        param = list(OrderedDict(w_delta[idx_1[0]]))
+        w_delta_common = [ {
+                param[j]: w_delta[i][list(OrderedDict(w_delta[i]))[j]]
+                for j in [-2, -1]
+            } 
+            for i in range(len(w_delta))
+        ]
+        w_buff_common = FedAsyncPoly(w_old_1, w_delta_common, recv_list, server_iter, args) 
+    elif len(idx_2):
+        param = list(OrderedDict(w_delta[idx_2[0]]))
+        w_delta_common = [ {
+                param[j]: w_delta[i][list(OrderedDict(w_delta[i]))[j]]
+                for j in [-2, -1]
+            } 
+            for i in range(len(w_delta))
+        ]
+        w_buff_common = FedAsyncPoly(w_old_2, w_delta_common, recv_list, server_iter, args) 
+
+    # 根据聚合结果调整公共层旧模型参数
+    for i in [-2, -1]:
+        new_common = w_buff_common[list(OrderedDict(w_buff_common))[i]]
+        w_buff_1[list(OrderedDict(w_buff_1))[i]] = new_common
+        w_buff_2[list(OrderedDict(w_buff_2))[i]] = new_common
+
+    
+    return w_buff_1, w_buff_2
+
+
 def FedBuff(w_old,w_delta,lr):
     w_buff = copy.deepcopy(w_old)
-    # print(f'w_buff size: {w_buff.size()}')
-    # file = open('w_buff.txt', 'w+')
-    # sys.stdout = file
-    # print(f'w_buff: {w_buff}')
-    # file.close()
-    # file = open('w_delta.txt', 'w+')
-    # sys.stdout = file
-    # print(f'w_delta: {w_delta}')
-    # file.close()
     w_avg_delta = copy.deepcopy(w_delta[0])
-    # file = open('w_avg_delta.txt', 'w+')
-    # sys.stdout = file
-    # print(f'w_avg_delta: {w_avg_delta}')
-    # file.close()
-    # file = open('w_avg_delta_keys.txt', 'w+')
-    # sys.stdout = file
-    # print(f'w_avg_delta_keys: {w_avg_delta.keys()}')
-    # file.close()
     for k in w_avg_delta.keys():
         for i in range(1,len(w_delta)):
             w_avg_delta[k] += w_delta[i][k]
         w_avg_delta[k] = torch.div(w_avg_delta[k],len(w_delta))
         w_buff[k] = torch.mul(w_buff[k],(1-lr)) + torch.mul(w_avg_delta[k],lr)
-    #len=K=10,lr=1时候为同步
-    # exit(0)
     return w_buff            
 
+def FedBuff_diff(w_old_1, w_old_2, w_delta, lr):
+    # 不同分割模型对应的参数量
+    params_1 = 4
+    params_2 = 8
+    # w_delta 里不同分割模型归类的索引
+    idx_1 = [i for i in range(len(w_delta)) if len(w_delta[i]) == params_1]
+    idx_2 = [i for i in range(len(w_delta)) if len(w_delta[i]) == params_2]
 
-#-------方案1：切3+4层，加了一层卷积层-------
-def FedBuff_layer(w_old,w_delta,lr):
-    w_buff = copy.deepcopy(w_old)
-    len_max = 8
-    len_min = 4
-    G2 = []
-    G4 = []
+    # 切割模型分为 各自层 + 公共层（两种模型里都是最后一层）
+    w_delta_1 = [
+        {item:w_delta[i][item] for item in (list(OrderedDict(w_delta[i]))[:-2])} for i in idx_1
+    ]
+    w_delta_2 = [
+        {item:w_delta[i][item] for item in (list(OrderedDict(w_delta[i]))[:-2])} for i in idx_2
+    ]
+    w_delta_common = []
+
+    # 聚合各自层
+    w_buff_1 = copy.deepcopy(w_old_1)
+    w_buff_2 = copy.deepcopy(w_old_2)
+    if len(w_delta_1):
+        w_buff_1 = FedBuff(w_old_1, w_delta_1, lr)
+    if len(w_delta_2):
+        w_buff_2 = FedBuff(w_old_2, w_delta_2, lr)
+
+    # 算力差异，按比例贡献公共层
+    percent = [0.5, 4.0]
     for i in range(len(w_delta)):
-        len_tmp = len(w_delta[i])
-        if len_tmp == len_max: G4.append(w_delta[i])
-        elif len_tmp == len_min: G2.append(w_delta[i])
+        p = 1.0
+        if i in idx_1:
+            p = percent[0]
+        elif i in idx_2:
+            p = percent[1]
+        w_delta[i][list(OrderedDict(w_delta[i]))[-2]] = torch.mul(w_delta[i][list(OrderedDict(w_delta[i]))[-2]], p)
+        w_delta[i][list(OrderedDict(w_delta[i]))[-1]] = torch.mul(w_delta[i][list(OrderedDict(w_delta[i]))[-1]], p)
 
-    K_G4 = len(G4)
-    if K_G4 > 0:   
-        w_avg_G4 = copy.deepcopy(G4[0])        
-        keys_list = list(w_avg_G4.keys())
-        for j,k in enumerate(keys_list):
-            for i in range(1,K_G4):
-                w_avg_G4[k] += G4[i][k]
-            if j <= 3: 
-                w_avg_G4[k] = torch.div(w_avg_G4[k],K_G4)
-                w_buff[k] = torch.mul(w_buff[k],(1-lr)) + torch.mul( w_avg_G4[k],lr)
+    # 聚合公共层
+    # 参数名称统一
+    if len(idx_1):
+        param = list(OrderedDict(w_delta[idx_1[0]]))
+        w_delta_common = [ {
+                param[j]: w_delta[i][list(OrderedDict(w_delta[i]))[j]]
+                for j in [-2, -1]
+            } 
+            for i in range(len(w_delta))
+        ]
+        w_buff_common = FedBuff(w_old_1, w_delta_common, lr) 
+    elif len(idx_2):
+        param = list(OrderedDict(w_delta[idx_2[0]]))
+        w_delta_common = [ {
+                param[j]: w_delta[i][list(OrderedDict(w_delta[i]))[j]]
+                for j in [-2, -1]
+            } 
+            for i in range(len(w_delta))
+        ]
+        w_buff_common = FedBuff(w_old_2, w_delta_common, lr) 
 
-        K_G2 = len(G2)
-        if K_G2 == 0 : 
-            for k in keys_list[4:]: 
-                w_avg_G4[k] = torch.div(w_avg_G4[k],K_G4)
-                w_buff[k] = torch.mul(w_buff[k],(1-lr)) + torch.mul( w_avg_G4[k],lr)
-        elif K_G2 > 0:
-            keys_list2 = list(G2[0].keys())
-            for j, k in enumerate(keys_list2):
-                for i in range(K_G2):
-                    w_avg_G4[keys_list[j+4]] += G2[i][k]
-                w_avg_G4[keys_list[j+4]] = torch.div(w_avg_G4[keys_list[j+4]],K_G2+K_G4)
-                w_buff[keys_list[j+4]] = torch.mul(w_buff[keys_list[j+4]],(1-lr)) + torch.mul(w_avg_G4[keys_list[j+4]],lr)
-
-    elif K_G4 == 0:
-        K_G2 = len(G2)
-        w_avg_G2 = copy.deepcopy(G2[0])
-        keys_list = list(w_old.keys())
-        keys_list2 = list(w_avg_G2.keys())
-        for j ,k in enumerate(keys_list2):
-            for i in range(1,K_G2):
-                w_avg_G2[k] += G2[i][k]
-            w_avg_G2[k] = torch.div(w_avg_G2[k],K_G2)
-            w_buff[keys_list[j+4]] = torch.mul(w_buff[keys_list[j+4]],(1-lr)) + torch.mul(w_avg_G2[k],lr)       
-
-    FL_G4 = w_buff
-    if K_G2 != 0:
-        FL_G2 = copy.deepcopy(G2[0])
-        for j,k in enumerate(keys_list2):
-            FL_G2[k] = w_buff[keys_list[j+4]]
-    else: FL_G2 = 0
-    return FL_G4, FL_G2    
+    # 根据聚合结果调整公共层旧模型参数
+    for i in [-2, -1]:
+        new_common = w_buff_common[list(OrderedDict(w_buff_common))[i]]
+        w_buff_1[list(OrderedDict(w_buff_1))[i]] = new_common
+        w_buff_2[list(OrderedDict(w_buff_2))[i]] = new_common
 
     
-#---------方案2：切第一层输入层+第4层---------
-def FedBuff_del_inputlayer(w_old,w_delta,lr):
-    w_buff = copy.deepcopy(w_old)
-    w_delta = copy.deepcopy(w_delta)
-
-    len_max = 8
-    len_min = 4
-    G2 = []
-    G4 = []
-    for i in range(len(w_delta)):
-        len_tmp = len(w_delta[i])
-        if len_tmp == len_max: G4.append(w_delta[i])
-        elif len_tmp == len_min: G2.append(w_delta[i])
-
-    K_G2 = len(G2)
-    K_G4 = len(G4)
-    if K_G2 == 0:
-        w_buff = FedBuff(w_buff,w_delta,lr)
-        FL_G4 = w_buff
-        FL_G2 = 0
-        return FL_G4, FL_G2
-    elif K_G4 == 0:
-        w_avg_G2 = copy.deepcopy(G2[0])
-        keys_list = list(w_old.keys())
-        keys_list2 = list(w_avg_G2.keys())
-        for j ,k in enumerate(keys_list2):
-            for i in range(1,K_G2):
-                w_avg_G2[k] += G2[i][k]
-            w_avg_G2[k] = torch.div(w_avg_G2[k],K_G2)
-            if j >= 2: #只聚合第4层的内容到全局
-                w_buff[keys_list[j+4]] = torch.mul(w_buff[keys_list[j+4]],(1-lr)) + torch.mul(w_avg_G2[k],lr)       
-                w_avg_G2[k] = w_buff[keys_list[j+4]]
-        FL_G4 = w_buff
-        FL_G2 = w_avg_G2
-        return FL_G4, FL_G2
-    else:
-        w_avg_G2 = copy.deepcopy(G2[0])
-        keys_list2 = list(w_avg_G2.keys())
-        for j ,k in enumerate(keys_list2):
-            for i in range(1,K_G2):
-                w_avg_G2[k] += G2[i][k]
-            if j <= 1:#Input 层
-                w_avg_G2[k] = torch.div(w_avg_G2[k],K_G2)
-
-        w_avg_G4 = copy.deepcopy(G4[0])        
-        keys_list = list(w_avg_G4.keys())
-        for j,k in enumerate(keys_list):
-            for i in range(1,K_G4):
-                w_avg_G4[k] += G4[i][k]
-            if j < 6:
-                w_avg_G4[k] = torch.div(w_avg_G4[k],K_G4)
-                w_buff[k] = torch.mul(w_buff[k],(1-lr)) + torch.mul(w_avg_G4[k],lr)
-            elif j>=6 :
-                w_avg_G4[k] += w_avg_G2[keys_list[j-4]]
-                w_avg_G4[k] = torch.div(w_avg_G4[k],K_G2+K_G4)
-                w_buff[k] = torch.mul(w_buff[k],(1-lr)) + torch.mul(w_avg_G4[k],lr)
-                w_avg_G2[keys_list[j-4]] = w_buff[k]
-        FL_G4 = w_buff
-        FL_G2 = w_avg_G2
-        return FL_G2, FL_G4
-
-
+    return w_buff_1, w_buff_2
 
 def calculate_accuracy(fx, y):
     preds = fx.max(1, keepdim=True)[1]
@@ -253,7 +252,7 @@ def evaluate_server_V2(fx_client, y, net_server, device):
         acc_test = calculate_accuracy_CPU(fx_server,y)
     return loss, acc_test
 
-def evaluate(net,dataset_tst, dataset_tst_label, net_server,device):
+def evaluate(net, dataset_tst, dataset_tst_label, net_server, device):
 
     acc_overall = 0; loss_overall = 0
     batch_size = min(1000, dataset_tst.shape[0])#选择batch_size小于2000
@@ -287,47 +286,7 @@ def evaluate(net,dataset_tst, dataset_tst_label, net_server,device):
     net.train()
     # acc_overall = acc_overall / (count_tst+1)
     acc_overall = 100.00*acc_overall / n_tst
-    return loss_overall, acc_overall    
-# def evaluate(self, net, ell, dataset_tst, dataset_tst_label, net_server):
-
-#     acc_overall = 0; loss_overall = 0;
-#     # loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
-    
-#     # batch_size = min(6000, dataset_tst.shape[0])
-#     # batch_size = min(2000, dataset_tst.shape[0])#选择batch_size小于2000
-#     batch_size = min(1000, dataset_tst.shape[0])#选择batch_size小于2000
-#     self.ldr_test = DataLoader(Dataset(dataset_tst, dataset_tst_label,train=False, dataset_name = self.dataset_name),
-#                     batch_size=batch_size,shuffle=False)
-
-#     #TODO:test bs可以传输args.bs进来
-#     net.eval()
-#     net = net.to(self.device)
-#     tst_gene_iter = self.ldr_test.__iter__()
-#     n_tst = dataset_tst.shape[0]
-#     with torch.no_grad():           
-#         for count_tst in range(int(np.ceil((n_tst)/batch_size))):
-#             images,labels = tst_gene_iter.__next__()
-#             images = images.to(self.device)
-#             labels = labels.to(self.device)
-#             fx = net(images)
-#             # Sending activations to server 
-#             loss_tmp, acc_tmp = evaluate_server_V2(fx, labels, net_server, self.device)
-
-#             loss_overall += loss_tmp.item()
-#             acc_overall += acc_tmp.item()
-
-#     loss_overall /= n_tst
-#     w_decay = 1e-3 #TODO:w_decay修改
-#     if w_decay != None:
-#         # Add L2 loss
-#         params = get_mdl_params([net], n_par=None)
-#         loss_overall += w_decay/2 * np.sum(params * params)
-        
-#     net.train()
-#     # acc_overall = acc_overall / (count_tst+1)
-#     acc_overall = 100.00*acc_overall / n_tst
-#     return loss_overall, acc_overall            
-
+    return loss_overall, acc_overall              
 
 def get_mdl_params(model_list, n_par=None):
     

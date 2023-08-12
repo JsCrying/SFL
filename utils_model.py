@@ -24,7 +24,7 @@ class ANet_same(nn.Module):
 class ANet_diff(nn.Module):
     def __init__(self, num_classes: int = 10, dropout: float = 0.5):
         super(ANet_diff,self).__init__()
-        dim_1: int = 128 * 7 * 7
+        dim_1: int = 128 * 8 * 8
         self.layer_1 = nn.Linear(dim_1, num_classes)
 
     def forward(self, x:torch.Tensor) -> torch.Tensor:
@@ -143,13 +143,13 @@ class VGG16_client_diff_1(nn.Module):
     def __init__(self) -> None:
         super(VGG16_client_diff_1, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
+            nn.Conv2d(3, 128, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
-        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
+        self.avgpool = nn.AdaptiveAvgPool2d((8, 8))
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
         x = self.avgpool(x)
@@ -170,10 +170,8 @@ class VGG16_client_diff_2(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
-        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
-        x = self.avgpool(x)
         return x    
 
 #---------------------

@@ -43,7 +43,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     1.read SA-GS connect data from csv total five days
     """
     # data_csv = pd.read_csv('./sort_EndTime_SH_550km_5PLAN_20SAT_60days.csv')#按照EndTime排序
-    data_csv = pd.read_csv('./20SA_10DAY_endtime.csv')
+    data_csv = pd.read_csv('./20SA_15DAY_endtime.csv')
     data_csv = np.array(data_csv)
     # data_csv = np.array(data_csv[0:40])#实验中只取400
     user_list_raw = data_csv[:,0]
@@ -61,7 +61,7 @@ def SFL_over_SA(rule_iid ,K, Group):
 
 
     #%%=====================================
-    program = "SFL AlexNet"
+    program = "SFL VGGNet"
     print(f"---------{program}----------")              
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -135,7 +135,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     elif args.Group == 2: # 不同分割
         init_net_client_diff_1 = clnt_model_diff_1()
         # pretrain
-        load_pretrained(init_net_client_diff_1, {x:x for x in [0, 2]}, 'features')
+        load_pretrained(init_net_client_diff_1, {7:2}, 'features')
         init_net_client_diff_2 = clnt_model_diff_2()
         # pretrain
         load_pretrained(init_net_client_diff_2, {x:x for x in [0, 2, 5, 7]}, 'features')
@@ -198,9 +198,14 @@ def SFL_over_SA(rule_iid ,K, Group):
     iter = 0        
     
     #%%Training test-------------------------------------------
-    [loss_trn, acc_trn] = evaluate(net = copy.deepcopy(FL_model).to(device), 
+    FL_test = []
+    if args.Group == 1:
+        FL_test = copy.deepcopy(FL_model).to(device)
+    elif args.Group == 2:
+        FL_test = copy.deepcopy(FL_diff_2).to(device)
+    [loss_trn, acc_trn] = evaluate(net = FL_test, 
         dataset_tst = cent_x, 
-        dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server), device = device)                 
+        dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server).to(device), device = device)                 
     print("'Federated Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" %( iter, loss_trn, acc_trn))         
     FL_acc_trn.append(acc_trn)
     FL_loss_trn.append(loss_trn)       
@@ -208,9 +213,9 @@ def SFL_over_SA(rule_iid ,K, Group):
     writer.add_scalars('Accuracy/Train', { 'All Clients': FL_acc_trn[saved_itr]}, 0 )
     writer.add_scalars('Loss/Train', {'All Clients': FL_loss_trn[saved_itr]}, 0) 
     #%% Testing-------------------------------------------------
-    [loss_tst, acc_tst] = evaluate(net = copy.deepcopy(FL_model).to(device), 
+    [loss_tst, acc_tst] = evaluate(net = FL_test, 
         dataset_tst = data_obj.test_x, 
-        dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server), device = device)                     
+        dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server).to(device), device = device)                     
     print("'Federated Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
     FL_acc.append(acc_tst)
     FL_loss.append(loss_tst)
@@ -238,15 +243,15 @@ def SFL_over_SA(rule_iid ,K, Group):
         clnt_endtime = data_times[idx] #卫星离开的时间，星历表应该按照Endtime排序
 
         if clnt in s_list: #分发，注意到第一轮的分发可是统一初始化
-            if args.Group == 2:
+            if args.Group == 1:
+                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))
+            elif args.Group == 2:
                 if clnt in idx_diff_1:
                     clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_1.named_parameters())))
                     # AN_net[clnt].load_state_dict(copy.deepcopy(dict(FL_AN.named_parameters())))
                 elif clnt in idx_diff_2:
                     clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_2.named_parameters())))
                     # AN_net[clnt].load_state_dict(copy.deepcopy(dict(FL_AN.named_parameters())))
-            elif args.Group == 1:
-                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))
 
             s_list.remove(clnt)
             r_list.append(clnt)#分发过了客户端可以在下次可见先回收
@@ -274,7 +279,6 @@ def SFL_over_SA(rule_iid ,K, Group):
                 params.requires_grad = True
 
             # Train Client
-            print('Client_' + str(clnt) + ' ' + 'do_grad: ' + str(sats[clnt].do_grad() - 1))
             sats[clnt] = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
                             do_srv2clnt_grad = 1, # sats[clnt].do_grad() - 1,# 不做server update 就把这个赋值改成 1
                             dataset_train = clnt_x[clnt], dataset_test = None,
@@ -290,11 +294,6 @@ def SFL_over_SA(rule_iid ,K, Group):
             for params in AN_net[clnt].parameters():
                 params.requires_grad = False
 
-            # clnt_smashed[clnt] = copy.deepcopy(smashed_list)
-            #TODO: 对smahed_data做改进
-            #TODO: server_train
-            #TODO：用户记录最后一个batch的smashed_data， labels
-            #TODO: 10张10张输入而不是60*10张一起输入
             # Train Server
             server_grads = []
             for smashed_labels in smashed_list:#长度为64*20 即local_bs*local_ep
@@ -320,8 +319,9 @@ def SFL_over_SA(rule_iid ,K, Group):
                     w_old = copy.deepcopy(FL_model.to(device).state_dict()) 
                     FL_params = FedBuff(w_old, w_locals_client, args.async_lr)
                 elif args.Group == 2:
-                    w_old = copy.deepcopy(FL_diff_2.to(device).state_dict()) 
-                    FL_diff_1_params, FL_diff_2_params = FedBuff_del_inputlayer(w_old, w_locals_client, args.async_lr)
+                    w_old_1 = copy.deepcopy(FL_diff_1.to(device).state_dict())
+                    w_old_2 = copy.deepcopy(FL_diff_2.to(device).state_dict()) 
+                    FL_diff_1_params, FL_diff_2_params = FedBuff_diff(w_old_1, w_old_2, w_locals_client, args.async_lr)
 
                 #清除Buff-----------------------------
                 w_locals_client = []
@@ -331,34 +331,36 @@ def SFL_over_SA(rule_iid ,K, Group):
 
                 if args.Group == 1:
                     FL_model.load_state_dict(FL_params) #只对客户端模型做FL
-                elif args.Group == 2 and FL_diff_2_params != 0:
+                elif args.Group == 2:
                     FL_diff_1.load_state_dict(FL_diff_1_params)
                     FL_diff_2.load_state_dict(FL_diff_2_params)  
 
                 iter += 1 #检验FL次数
             else:
-                FL_model = FL_model #
+                FL_model = FL_model
                 FL_diff_1 = FL_diff_1
                 FL_diff_2 = FL_diff_2
 
         # iter += 1
         #%%Training test-------------------------------------------
-        [loss_trn, acc_trn] = evaluate(net = copy.deepcopy(FL_model).to(device), 
+        if args.Group == 1:
+            FL_test = copy.deepcopy(FL_model).to(device)
+        elif args.Group == 2:
+            FL_test = copy.deepcopy(FL_diff_2).to(device)
+        [loss_trn, acc_trn] = evaluate(net = FL_test, 
             dataset_tst = cent_x, 
-            dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server), device = device)
-        print('Client_' + str(clnt))
-        print("'Federated Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" %( iter, loss_trn, acc_trn))      
+            dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server).to(device), device = device)                 
+        print("'Federated Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" % ( iter, loss_trn, acc_trn))      
         FL_acc_trn.append(acc_trn)
         FL_loss_trn.append(loss_trn)       
 
         writer.add_scalars('Accuracy/Train', { 'All Clients': FL_acc_trn[saved_itr]}, clnt_endtime )
         writer.add_scalars('Loss/Train', {'All Clients': FL_loss_trn[saved_itr]}, clnt_endtime) 
         #%% Testing-------------------------------------------------
-        [loss_tst, acc_tst] = evaluate(net = copy.deepcopy(FL_model).to(device), 
+        [loss_tst, acc_tst] = evaluate(net = FL_test, 
             dataset_tst = data_obj.test_x, 
-            dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server), device = device)                     
-        print("'Federated Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))
-        print('')
+            dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server).to(device), device = device)                     
+        print("'Federated Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
         FL_acc.append(acc_tst)
         FL_loss.append(loss_tst)
         saved_itr +=1
@@ -398,8 +400,8 @@ def SFL_over_SA(rule_iid ,K, Group):
 #===================================================s
 
 if __name__  == '__main__':
-    for Group_type in [1]:
-        for rule_iid in ['iid']:
+    for Group_type in [1, 2]:
+        for rule_iid in ['iid', 'Noniid']:
             for K in [20]:
                 SFL_over_SA(rule_iid, K, Group_type)
 
