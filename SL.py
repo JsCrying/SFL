@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2,3,4'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1, 4, 5, 6, 7'
 import sys
 from path import Path
 import numpy as np
@@ -13,18 +13,13 @@ from utils_dataset import *
 from utils_model import *
 from utils_general import *
 from utils_args import args_parser
-from clients_side import *
+from utils_SL.clients_side_SL import *
 from server_side import *
 import math
 
   
 from tensorboardX import SummaryWriter
 
-#---------------------------------------------
-#args.group == 2 即切两种：2层指的是第1层+第4层，
-##TODO:聚合方案（1） ：相同大小的聚合，不同大小的不聚合，取ACC平均值
-#聚合方案（2）：第一层不聚合，其他聚合，测整体ACC
-#args.group == 1 全部切4层
 #---------------------------------------------
 #%%----- main process ----
 def SFL_over_SA(rule_iid ,K, Group):
@@ -33,7 +28,9 @@ def SFL_over_SA(rule_iid ,K, Group):
     args = args_parser()
     args.K = K
     args.Group = Group
-
+    args.RUN = 'SL'
+    # args.local_bs = 32
+    # args.local_ep = 64
     #%%-----------------------------------
     # The Core Process
     #-------------------------------------
@@ -58,7 +55,7 @@ def SFL_over_SA(rule_iid ,K, Group):
 
 
     #%%=====================================
-    program = "SFL VGGNet"
+    program = "SL VGGNet"
     print(f"---------{program}----------")              
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -76,7 +73,7 @@ def SFL_over_SA(rule_iid ,K, Group):
 
     #%%---- Tensorboard for checking results----------------------------------------
     suffix = 'Async_' + str(args.Group) 
-    suffix += '_SFL_' + str(args.num_users) + '_' + str(args.K) + '_' + str(args.dataset)
+    suffix += '_SL_' + str(args.num_users) + '_' + str(args.K) + '_' + str(args.dataset)
     suffix += '_LR%f_BS%d_E%d_' %(args.local_lr, args.local_bs, args.local_ep)
     data_path_tb = 'Folder/'
     if (not os.path.exists('%sRuns/%s/%s' %(data_path_tb, data_obj.instance_name, suffix))):
@@ -105,14 +102,9 @@ def SFL_over_SA(rule_iid ,K, Group):
     FL_model = []
     FL_diff_1 = []
     FL_diff_2 = []
-    AN_model_func = []
     net_server = []
 
     clnt_models = list(range(args.num_users))
-    AN_net = list(range(args.num_users))
-    clnt_glob_graditent = [[] for i in range(args.num_users)]
-    AN_loss_train_list = [[] for i in range(args.num_users)]
-    AN_acc_train_list = [[] for i in range(args.num_users)]
 
     if args.Group == 1: # 同分割
         init_net_client_same = clnt_model_same()
@@ -121,8 +113,6 @@ def SFL_over_SA(rule_iid ,K, Group):
 
         FL_model = clnt_model_same()
         FL_model.load_state_dict(copy.deepcopy(dict(init_net_client_same.named_parameters())))
-
-        AN_model_func = lambda: ANet_same()
 
         net_server = server_model_same()
         load_pretrained(net_server, {x:x-5 for x in [5, 7, 10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
@@ -142,13 +132,10 @@ def SFL_over_SA(rule_iid ,K, Group):
         FL_diff_2 = clnt_model_diff_2()
         FL_diff_2.load_state_dict(copy.deepcopy(dict(init_net_client_diff_2.named_parameters())))
 
-        AN_model_func = lambda: ANet_diff()
-
         net_server = server_model_diff()
         # pretrain
         load_pretrained(net_server, {x:x-10 for x in [10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
         load_pretrained(net_server, {x:x for x in [0, 3]}, 'classifier')
-    init_local_AN = AN_model_func()
     
     net_server.to(device)
 
@@ -157,8 +144,6 @@ def SFL_over_SA(rule_iid ,K, Group):
     FL_acc = []
     FL_loss_trn = []
     FL_acc_trn = []
-    recv_iter_list = []
-    w_locals_client = []
     idx_diff_1 = []
     idx_diff_2 = []
 
@@ -166,31 +151,24 @@ def SFL_over_SA(rule_iid ,K, Group):
     if args.Group == 1:
         for clnt in user_id: #初始轮训分发
             #----load the global federated model------
-            clnt_models[clnt] =  clnt_model_same().to(device)
+            clnt_models[clnt] = clnt_model_same().to(device)
             clnt_models[clnt].load_state_dict(copy.deepcopy(dict(init_net_client_same.named_parameters())))
-            AN_net[clnt] = AN_model_func().to(device)
-            AN_net[clnt].load_state_dict(copy.deepcopy(dict(init_local_AN.named_parameters())))
     elif args.Group == 2:
     #---- 方案2：一半用户分割1层一半用户分割2层网络--
         m = max(int(args.frac * args.num_users), 1)
         idx_diff_1 = list((np.random.choice(user_id, m, replace = False)))
         idx_diff_2 = [id for id in user_id if (id not in idx_diff_1)]
         for clnt in idx_diff_1:
-            clnt_models[clnt] =  clnt_model_diff_1().to(device)
-            clnt_models[clnt].load_state_dict(copy.deepcopy(dict(init_net_client_diff_1.named_parameters())))
-            AN_net[clnt] = AN_model_func().to(device)
-            AN_net[clnt].load_state_dict(copy.deepcopy(dict(init_local_AN.named_parameters())))            
+            clnt_models[clnt] = clnt_model_diff_1().to(device)
+            clnt_models[clnt].load_state_dict(copy.deepcopy(dict(init_net_client_diff_1.named_parameters())))           
         for clnt in idx_diff_2:
-            clnt_models[clnt] =  clnt_model_diff_2().to(device)
-            clnt_models[clnt].load_state_dict(copy.deepcopy(dict(init_net_client_diff_2.named_parameters())))
-            AN_net[clnt] = AN_model_func().to(device)
-            AN_net[clnt].load_state_dict(copy.deepcopy(dict(init_local_AN.named_parameters())))             
+            clnt_models[clnt] = clnt_model_diff_2().to(device)
+            clnt_models[clnt].load_state_dict(copy.deepcopy(dict(init_net_client_diff_2.named_parameters())))           
 
     #----内存释放----------
     del init_net_client_diff_1
     del init_net_client_diff_2
     del init_net_client_same
-    del init_local_AN
 
     #%%---从已经拿到初始网络之后开始训练程序—-----
     iter = 0        
@@ -204,7 +182,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     [loss_trn, acc_trn] = evaluate(net = FL_test, 
         dataset_tst = cent_x, 
         dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server).to(device), device = device)                 
-    print("'Federated Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" %( iter, loss_trn, acc_trn))         
+    print("'Split Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" %( iter, loss_trn, acc_trn))         
     FL_acc_trn.append(acc_trn)
     FL_loss_trn.append(loss_trn)       
 
@@ -214,98 +192,75 @@ def SFL_over_SA(rule_iid ,K, Group):
     [loss_tst, acc_tst] = evaluate(net = FL_test, 
         dataset_tst = data_obj.test_x, 
         dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server).to(device), device = device)                     
-    print("'Federated Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
+    print("'Split Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
     FL_acc.append(acc_tst)
     FL_loss.append(loss_tst)
     saved_itr +=1
     writer.add_scalars('Accuracy/Test',    {'All Clients': FL_acc[saved_itr]   }, 0)
     writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, 0 )  
 
-    server_iter = 0
-    do_grad_top = args.num_users
-    sats = [Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
-                do_srv2clnt_grad = do_grad_top,
-                dataset_train = clnt_x[clnt], dataset_test = None,
-                idxs = clnt_y[clnt], idxs_test = None,
-                dataset_name = args.dataset)
-                for clnt in range(args.num_users)]
+    window_acc_trn_1 = 0
+    window_acc_trn_2 = 0
+    window_loss_trn_1 = 0
+    window_loss_trn_2 = 0
+    window_acc_tst_1 = 0
+    window_acc_tst_2 = 0
+    window_loss_tst_1 = 0
+    window_loss_tst_2 = 0
+
+    def calc_avg(curr, window):
+        if len(window) >= 20:
+            window = window[1:]
+        window.append(curr)
+        return 1.0 * sum(window) / len(window), window 
 
     #%%------按照星历表遍历----------------------------------------------------
     for idx, clnt in enumerate(user_list):    #按照星历表遍历       
         clnt_endtime = data_times[idx] #卫星离开的时间，星历表应该按照Endtime排序
 
         clnt_models[clnt].train()
-        AN_net[clnt].train()
         for params in clnt_models[clnt].parameters():
             params.requires_grad = True
 
-        for params in AN_net[clnt].parameters():
-            params.requires_grad = True
-
-        sats[clnt] = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
-                        recv_iter = sats[clnt].recv_iter,
-                        do_srv2clnt_grad = do_grad_top,
+        sats_clnt = Client(args, clnt_models[clnt], clnt, device, net_server,
                         dataset_train = clnt_x[clnt], dataset_test = None, idxs = clnt_y[clnt],
                         idxs_test = None, dataset_name = args.dataset) #测试集没有放在client
-        [w_client, AN_params, smashed_list, AN_loss_train, AN_acc_train] = sats[clnt].train(net = copy.deepcopy(clnt_models[clnt].to(device)))
+        [w_client, net_server_update] = sats_clnt.train(net = copy.deepcopy(clnt_models[clnt].to(device)))
+        net_server = copy.deepcopy(net_server_update)
 
-        recv_iter_list.append(sats[clnt].recv_iter)
-        w_locals_client.append(copy.deepcopy(w_client))
-        AN_loss_train_list[clnt].append(AN_loss_train)
-        AN_acc_train_list[clnt].append(AN_acc_train)
-        AN_net[clnt].load_state_dict(copy.deepcopy(dict(AN_params)))           
-        #Frezz model
-        for params in AN_net[clnt].parameters():
-            params.requires_grad = False
+        if (idx + 1) % (args.num_users) == 0:  # 衰减步长 200
+            args.local_lr = args.local_lr * (0.992 ** (4.0 * pow((idx + 1) / (args.num_users), 1.0 / 4.0)))
+            args.local_lr = max(1e-3, args.local_lr)
+        print(args.local_lr)
 
-        for smashed_labels in smashed_list: # 长度为64*32 即local_bs*local_ep
-            smashed_data = smashed_labels[0]
-            local_labels = smashed_labels[1]
-            [net_server_update, global_gradient] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
-            clnt_glob_graditent[clnt] = global_gradient #最后一次的梯度
-            net_server = copy.deepcopy(net_server_update) #有更新，但是很慢
-        server_iter = server_iter + 1
-
-        # 测试 FL_model + server_model               
-        if len(w_locals_client) >= args.K:             #iter%2==0,5,10
-            args.async_lr = 1 if args.K % args.num_users == 0 else 0.1
-            # TODO
-            if args.Group == 1:
-                w_old = copy.deepcopy(FL_model.to(device).state_dict()) 
-                FL_params = FedAsyncPoly(w_old, w_locals_client, recv_iter_list, server_iter, args)
-            elif args.Group == 2:
-                w_old_1 = copy.deepcopy(FL_diff_1.to(device).state_dict()) 
-                w_old_2 = copy.deepcopy(FL_diff_2.to(device).state_dict())
-                FL_diff_1_params, FL_diff_2_params = FedAsyncPoly_diff(w_old_1, w_old_2, w_locals_client, recv_iter_list, server_iter, args)
-            #清除Buff-----------------------------
-            recv_iter_list = []
-            w_locals_client = []
-            if args.Group == 1:
-                FL_model.load_state_dict(FL_params) #只对客户端模型做FL
-            elif args.Group == 2:
-                FL_diff_1.load_state_dict(FL_diff_1_params)
-                FL_diff_2.load_state_dict(FL_diff_2_params)  
-
-            if (idx + 1) % (args.num_users) == 0:  # 衰减步长 200
-                args.local_lr = args.local_lr * (0.992 ** (4.0 * pow((idx + 1) / (args.num_users), 1.0 / 4.0)))
-                args.local_lr = max(1e-3, args.local_lr)
-            print(args.local_lr)
-            iter += 1
-
-        else:
-            FL_model = FL_model
-            FL_diff_1 = FL_diff_1
-            FL_diff_2 = FL_diff_2
+        iter+=1
 
         #%%Training test-------------------------------------------
         if args.Group == 1:
+            FL_model.load_state_dict(copy.deepcopy(w_client))
             FL_test = copy.deepcopy(FL_model).to(device)
         elif args.Group == 2:
-            FL_test = copy.deepcopy(FL_diff_2).to(device)
+            if clnt in idx_diff_1:
+                FL_diff_1.load_state_dict(copy.deepcopy(w_client))
+                FL_test = copy.deepcopy(FL_diff_1).to(device)
+            elif clnt in idx_diff_2:
+                FL_diff_2.load_state_dict(copy.deepcopy(w_client))
+                FL_test = copy.deepcopy(FL_diff_2).to(device)
+        del w_client
         [loss_trn, acc_trn] = evaluate(net = FL_test, 
             dataset_tst = cent_x, 
-            dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server).to(device), device = device)                 
-        print("'Federated Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" % ( iter, loss_trn, acc_trn))      
+            dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server).to(device), device = device)
+        # [loss_trn, window_loss_trn] = calc_avg(loss_trn, window_loss_trn)
+        # [acc_trn, window_acc_trn] = calc_avg(acc_trn, window_acc_trn)  
+        if clnt in idx_diff_1:
+            window_loss_trn_1 = loss_trn
+            window_acc_trn_1 = acc_trn
+        elif clnt in idx_diff_2:
+            window_loss_trn_2 = loss_trn
+            window_acc_trn_2 = acc_trn
+        loss_trn = (window_loss_trn_1 + window_loss_trn_2) / 2.0
+        acc_trn = (window_acc_trn_1 + window_acc_trn_2) / 2.0               
+        print("'Split Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" % ( iter, loss_trn, acc_trn))      
         FL_acc_trn.append(acc_trn)
         FL_loss_trn.append(loss_trn)       
 
@@ -314,37 +269,28 @@ def SFL_over_SA(rule_iid ,K, Group):
         #%% Testing-------------------------------------------------
         [loss_tst, acc_tst] = evaluate(net = FL_test, 
             dataset_tst = data_obj.test_x, 
-            dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server).to(device), device = device)                     
-        print("'Federated Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
+            dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server).to(device), device = device)
+        if clnt in idx_diff_1:
+            window_loss_tst_1 = loss_tst
+            window_acc_tst_1 = acc_tst
+        elif clnt in idx_diff_2:
+            window_loss_tst_2 = loss_tst
+            window_acc_tst_2 = acc_tst
+        loss_tst = (window_loss_tst_1 + window_loss_tst_2) / 2.0
+        acc_tst = (window_acc_tst_1 + window_acc_tst_2) / 2.0   
+        # [loss_tst, window_loss_tst] = calc_avg(loss_tst, window_loss_tst)
+        # [acc_tst, window_acc_tst] = calc_avg(acc_tst, window_acc_tst)                    
+        print("'Split Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
         FL_acc.append(acc_tst)
         FL_loss.append(loss_tst)
         saved_itr +=1
         writer.add_scalars('Accuracy/Test',    {'All Clients': FL_acc[saved_itr]   },clnt_endtime)
         writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, clnt_endtime)
         writer.add_scalars('LR', {'All Clients': args.local_lr}, clnt_endtime)
-        #%%---------------------------------回传-------------------------------------------------
-        if args.Group == 1:
-            # Freeze model
-            for params in FL_model.parameters():
-                params.requires_grad = False
-            
-            clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))
 
-        elif args.Group == 2:
-            for params in FL_diff_1.parameters():
-                params.requires_grad = False
-            for params in FL_diff_2.parameters():
-                params.requires_grad = False
-            
-            if clnt in idx_diff_1:
-                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_1.named_parameters())))
-            elif clnt in idx_diff_2:
-                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_2.named_parameters())))
-                
-        sats[clnt].recv_iter = server_iter
-
-        if idx % 2000 == 0:
+        if idx % 200 == 0:
             record(FL_acc, FL_loss, FL_acc_trn, FL_loss_trn, args, rule_iid)
+        torch.cuda.empty_cache()
 
     record(FL_acc, FL_loss, FL_acc_trn, FL_loss_trn, args, rule_iid)
                 # ==========================================
@@ -354,16 +300,8 @@ def SFL_over_SA(rule_iid ,K, Group):
 #===================================================s
 
 if __name__  == '__main__':
-    # for Group_type in [2,1]:
-    #     for rule_iid in ['iid', 'Noniid']:
-    #         for K in [1]:
-    #             SFL_over_SA(rule_iid, K, Group_type)
-    #     for rule_iid in ['iid', 'Noniid']:
-    #         for K in [5]:
-    #             SFL_over_SA(rule_iid, K, Group_type)
-
-    for Group_type in [2, 1]:
-        for rule_iid in ['iid']:
-            for K in [1, 5, 10]:
+    for Group_type in [2]:
+        for rule_iid in ['iid', 'Noniid']:
+            for K in [1]:
                 SFL_over_SA(rule_iid, K, Group_type)
     print('wait for check!')

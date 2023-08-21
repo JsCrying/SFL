@@ -1,5 +1,5 @@
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2,3,4'
+os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2,3,4'
 import sys
 from path import Path
 import numpy as np
@@ -8,7 +8,6 @@ import torch
 from torch import nn
 from pandas import DataFrame
 import pandas as pd
-import math
 
 from utils_dataset import *
 from utils_model import *
@@ -16,16 +15,11 @@ from utils_general import *
 from utils_args import args_parser
 from clients_side import *
 from server_side import *
+import math
 
   
 from tensorboardX import SummaryWriter
-#TODO:sync 同步需要user_id的识别
-#TODO：卫星数据放在了数据分配后面，如果卫星部署改变了需要及时调整args.num_users
-#---------------------------------------------
-#args.group == 2 即切两种：2层指的是第1层+第4层，
-##TODO:聚合方案（1） ：相同大小的聚合，不同大小的不聚合，取ACC平均值
-#聚合方案（2）：第一层不聚合，其他聚合，测整体ACC
-#args.group == 1 全部切4层
+
 #---------------------------------------------
 #%%----- main process ----
 def SFL_over_SA(rule_iid ,K, Group):
@@ -34,16 +28,15 @@ def SFL_over_SA(rule_iid ,K, Group):
     args = args_parser()
     args.K = K
     args.Group = Group
+    args.RUN = 'SFL_async'
 
     #%%-----------------------------------
     # The Core Process
     #-------------------------------------
-    #TODO: 卫星时间
     """
     1.read SA-GS connect data from csv total five days
-    """
-    # data_csv = pd.read_csv('./sort_EndTime_SH_550km_5PLAN_20SAT_60days.csv')#按照EndTime排序
-    data_csv = pd.read_csv('./20SA_15DAY_endtime.csv')
+    # """
+    data_csv = pd.read_csv('./20SA_15DAY_endtime.csv')#按照EndTime排序
     data_csv = np.array(data_csv)
     # data_csv = np.array(data_csv[0:40])#实验中只取400
     user_list_raw = data_csv[:,0]
@@ -69,7 +62,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     rule_iid = rule_iid   
     data_path = 'Folder/'
     # data_obj = DatasetObject(dataset='mnist', n_client = args.num_users , seed=23, rule='iid', rule_arg = 0.6, unbalanced_sgm=0, data_path=data_path)
-    data_obj = DatasetObject(dataset=args.dataset, n_client = args.num_users , seed=23, rule= rule_iid, rule_arg = 0.3, unbalanced_sgm=0, data_path=data_path)
+    data_obj = DatasetObject(dataset=args.dataset, n_client = args.num_users , seed=23, rule= rule_iid, rule_arg = 0.6, unbalanced_sgm=0, data_path=data_path)
     
     clnt_x = data_obj.clnt_x
     clnt_y = data_obj.clnt_y
@@ -78,8 +71,8 @@ def SFL_over_SA(rule_iid ,K, Group):
     user_id = list(set(user_list))
 
     #%%---- Tensorboard for checking results----------------------------------------
-    suffix ='Sync_' + str(args.Group) 
-    suffix += '_SFL_' + str(args.num_users) +'_' +str(args.K) + '_' + str(args.dataset)
+    suffix = 'Async_' + str(args.Group) 
+    suffix += '_SFL_' + str(args.num_users) + '_' + str(args.K) + '_' + str(args.dataset)
     suffix += '_LR%f_BS%d_E%d_' %(args.local_lr, args.local_bs, args.local_ep)
     data_path_tb = 'Folder/'
     if (not os.path.exists('%sRuns/%s/%s' %(data_path_tb, data_obj.instance_name, suffix))):
@@ -93,8 +86,13 @@ def SFL_over_SA(rule_iid ,K, Group):
     # if args.dataset == 'mnist':
     #     clnt_model_func = lambda: CNNmnist_client_side()
     if args.dataset =='Cifar10' or 'CIFAR10':
-        clnt_model_same = lambda: VGG16_client_same()
-        server_model_same = lambda: VGG16_server_same()
+        # 原始对比方案，别乱删
+        # clnt_model_same = lambda: VGG16_client_same()
+        # server_model_same = lambda: VGG16_server_same()
+
+        # 相同分割 切割4层
+        clnt_model_same = lambda: VGG16_client_same2()
+        server_model_same = lambda: VGG16_server_same2()
 
         clnt_model_diff_1 = lambda: VGG16_client_diff_1()
         clnt_model_diff_2 = lambda: VGG16_client_diff_2()
@@ -114,21 +112,20 @@ def SFL_over_SA(rule_iid ,K, Group):
     clnt_models = list(range(args.num_users))
     AN_net = list(range(args.num_users))
     clnt_glob_graditent = [[] for i in range(args.num_users)]
-    AN_loss_train_list = [[] for i in range(args.num_users)]
-    AN_acc_train_list = [[] for i in range(args.num_users)]
 
     if args.Group == 1: # 同分割
         init_net_client_same = clnt_model_same()
         # pretrain
-        load_pretrained(init_net_client_same, {x:x for x in [0, 2]}, 'features')
+        load_pretrained(init_net_client_same, {x:x for x in [0, 2, 5, 7]}, 'features')
 
         FL_model = clnt_model_same()
         FL_model.load_state_dict(copy.deepcopy(dict(init_net_client_same.named_parameters())))
-
-        AN_model_func = lambda: ANet_same()
+        # 原始对比方案，别乱删
+        # AN_model_func = lambda: ANet_same()
+        AN_model_func = lambda: ANet_same2()
 
         net_server = server_model_same()
-        load_pretrained(net_server, {x:x-5 for x in [5, 7, 10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
+        load_pretrained(net_server, {x:x-10 for x in [10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
         load_pretrained(net_server, {x:x for x in [0, 3]}, 'classifier')
         # pretrain
         
@@ -160,6 +157,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     FL_acc = []
     FL_loss_trn = []
     FL_acc_trn = []
+    recv_iter_list = []
     w_locals_client = []
     idx_diff_1 = []
     idx_diff_2 = []
@@ -196,7 +194,7 @@ def SFL_over_SA(rule_iid ,K, Group):
 
     #%%---从已经拿到初始网络之后开始训练程序—-----
     iter = 0        
-    
+
     #%%Training test-------------------------------------------
     FL_test = []
     if args.Group == 1:
@@ -223,13 +221,7 @@ def SFL_over_SA(rule_iid ,K, Group):
     writer.add_scalars('Accuracy/Test',    {'All Clients': FL_acc[saved_itr]   }, 0)
     writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, 0 )  
 
-
-#------------------- Sync FL------------------
-    s_list = [] #记录分发
-    r_list = copy.deepcopy(user_id)   #记录待接收
-    #如果没有新的更新就空转 ：防止不同的客户端训练频次不同，容易过拟合
-    s_num = 0
-    server_iter = 0  # 学习率衰减控制
+    server_iter = 0
     do_grad_top = args.num_users
     sats = [Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
                 do_srv2clnt_grad = do_grad_top,
@@ -242,106 +234,69 @@ def SFL_over_SA(rule_iid ,K, Group):
     for idx, clnt in enumerate(user_list):    #按照星历表遍历       
         clnt_endtime = data_times[idx] #卫星离开的时间，星历表应该按照Endtime排序
 
-        if clnt in s_list: #分发，注意到第一轮的分发可是统一初始化
+        clnt_models[clnt].train()
+        AN_net[clnt].train()
+        for params in clnt_models[clnt].parameters():
+            params.requires_grad = True
+
+        for params in AN_net[clnt].parameters():
+            params.requires_grad = True
+
+        sats[clnt] = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
+                        recv_iter = sats[clnt].recv_iter,
+                        do_srv2clnt_grad = do_grad_top,
+                        dataset_train = clnt_x[clnt], dataset_test = None, idxs = clnt_y[clnt],
+                        idxs_test = None, dataset_name = args.dataset) #测试集没有放在client
+        [w_client, AN_params, smashed_list] = sats[clnt].train(net = copy.deepcopy(clnt_models[clnt].to(device)))
+        total = sum([w_client[param].nelement() * w_client[param].element_size() for param in w_client.keys()])
+        print(f'w_client {total}')
+
+        recv_iter_list.append(sats[clnt].recv_iter)
+        w_locals_client.append(copy.deepcopy(w_client))
+        AN_net[clnt].load_state_dict(copy.deepcopy(dict(AN_params)))           
+        #Frezz model
+        for params in AN_net[clnt].parameters():
+            params.requires_grad = False
+
+        for smashed_labels in smashed_list: # 长度为64*32 即local_bs*local_ep
+            smashed_data = smashed_labels[0]
+            local_labels = smashed_labels[1]
+            [net_server_update, global_gradient] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
+            clnt_glob_graditent[clnt] = global_gradient #最后一次的梯度
+            net_server = copy.deepcopy(net_server_update) #有更新，但是很慢
+        server_iter = server_iter + 1
+
+        # 测试 FL_model + server_model               
+        if len(w_locals_client) >= args.K:             #iter%2==0,5,10
+            args.async_lr = 1 if args.K % args.num_users == 0 else 0.1
+            # TODO
             if args.Group == 1:
-                clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))
+                w_old = copy.deepcopy(FL_model.to(device).state_dict()) 
+                FL_params = FedAsyncPoly(w_old, w_locals_client, recv_iter_list, server_iter, args)
             elif args.Group == 2:
-                if clnt in idx_diff_1:
-                    clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_1.named_parameters())))
-                    # AN_net[clnt].load_state_dict(copy.deepcopy(dict(FL_AN.named_parameters())))
-                elif clnt in idx_diff_2:
-                    clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_2.named_parameters())))
-                    # AN_net[clnt].load_state_dict(copy.deepcopy(dict(FL_AN.named_parameters())))
+                w_old_1 = copy.deepcopy(FL_diff_1.to(device).state_dict()) 
+                w_old_2 = copy.deepcopy(FL_diff_2.to(device).state_dict())
+                FL_diff_1_params, FL_diff_2_params = FedAsyncPoly_diff(w_old_1, w_old_2, w_locals_client, recv_iter_list, server_iter, args)
+            #清除Buff-----------------------------
+            recv_iter_list = []
+            w_locals_client = []
+            if args.Group == 1:
+                FL_model.load_state_dict(FL_params) #只对客户端模型做FL
+            elif args.Group == 2:
+                FL_diff_1.load_state_dict(FL_diff_1_params)
+                FL_diff_2.load_state_dict(FL_diff_2_params)  
 
-            s_list.remove(clnt)
-            r_list.append(clnt)#分发过了客户端可以在下次可见先回收
-            s_num += 1
-            if (s_num > 0) and (s_num % args.num_users == 0):
-                s_list = []
-                # r_list = copy.deepcopy(user_id)        
-
-        elif clnt in r_list: #接收
-            print('Client_' + str(clnt) + ' remove from r_list')
-            r_list.remove(clnt)
-           
-            #----学习率衰减==============================
-            # if (idx+1) % args.num_users == 0 :
-            #     args.local_lr = args.local_lr * 0.9
-            #     args.local_lr = max(1e-3,args.local_lr)
-
-            #============================================
-            clnt_models[clnt].train()
-            AN_net[clnt].train()
-            for params in clnt_models[clnt].parameters():
-                params.requires_grad = True
-
-            for params in AN_net[clnt].parameters():
-                params.requires_grad = True
-
-            # Train Client
-            sats[clnt] = Client(args, clnt_models[clnt], clnt, device, AN_net[clnt],
-                            do_srv2clnt_grad = 1, # sats[clnt].do_grad() - 1,# 不做server update 就把这个赋值改成 1
-                            dataset_train = clnt_x[clnt], dataset_test = None,
-                            idxs = clnt_y[clnt], idxs_test = None,
-                            dataset_name = args.dataset) #测试集没有放在client
-            [w_client, AN_params, smashed_list, AN_loss_train, AN_acc_train] = sats[clnt].train(net = copy.deepcopy(clnt_models[clnt].to(device)))
-
-            w_locals_client.append(copy.deepcopy(w_client))
-            AN_loss_train_list[clnt].append(AN_loss_train)
-            AN_acc_train_list[clnt].append(AN_acc_train)
-            AN_net[clnt].load_state_dict(copy.deepcopy(dict(AN_params)))
-            #Frezz model
-            for params in AN_net[clnt].parameters():
-                params.requires_grad = False
-
-            # Train Server
-            server_grads = []
-            for smashed_labels in smashed_list:#长度为64*20 即local_bs*local_ep
-                smashed_data = smashed_labels[0]
-                local_labels = smashed_labels[1]
-                [net_server_update, server_grad] = train_server(net_server, smashed_data, local_labels, device=device, lr=args.local_lr)
-                server_grads.append(server_grad)
-                net_server = copy.deepcopy(net_server_update) #有更新，但是很慢
-            if (server_iter + 1) % 10 == 0:  # 衰减步长 200
-                args.local_lr = args.local_lr * (0.992 ** (4.0 * pow((server_iter + 1.0) / 10.0, 1.0 / 4.0)))
-                args.local_lr = max(1e-2, args.local_lr)
+            if (idx + 1) % (args.num_users) == 0:  # 衰减步长 200
+                args.local_lr = args.local_lr * (0.992 ** (4.0 * pow((idx + 1) / (args.num_users), 1.0 / 4.0)))
+                args.local_lr = max(1e-3, args.local_lr)
             print(args.local_lr)
-            server_iter = server_iter + 1
+            iter += 1
 
-            # 测试 FL_model + server_model            
-            # 这里也可以写成 if r_list == 0
-            if len(w_locals_client) >= args.K and (args.K == args.num_users):             #iter%2==0,5,10
+        else:
+            FL_model = FL_model
+            FL_diff_1 = FL_diff_1
+            FL_diff_2 = FL_diff_2
 
-                print('观测聚合内容长度', len(w_locals_client))#一直是20个，不重复的user提供的
-                args.async_lr = 1 if args.K % args.num_users == 0 else 0.1
-                # TODO
-                if args.Group == 1:
-                    w_old = copy.deepcopy(FL_model.to(device).state_dict()) 
-                    FL_params = FedBuff(w_old, w_locals_client, args.async_lr)
-                elif args.Group == 2:
-                    w_old_1 = copy.deepcopy(FL_diff_1.to(device).state_dict())
-                    w_old_2 = copy.deepcopy(FL_diff_2.to(device).state_dict()) 
-                    FL_diff_1_params, FL_diff_2_params = FedBuff_diff(w_old_1, w_old_2, w_locals_client, args.async_lr)
-
-                #清除Buff-----------------------------
-                w_locals_client = []
-                #更新r_list和s_list-------------------
-                r_list = []
-                s_list = copy.deepcopy(user_id)
-
-                if args.Group == 1:
-                    FL_model.load_state_dict(FL_params) #只对客户端模型做FL
-                elif args.Group == 2:
-                    FL_diff_1.load_state_dict(FL_diff_1_params)
-                    FL_diff_2.load_state_dict(FL_diff_2_params)  
-
-                iter += 1 #检验FL次数
-            else:
-                FL_model = FL_model
-                FL_diff_1 = FL_diff_1
-                FL_diff_2 = FL_diff_2
-
-        # iter += 1
         #%%Training test-------------------------------------------
         if args.Group == 1:
             FL_test = copy.deepcopy(FL_model).to(device)
@@ -367,15 +322,13 @@ def SFL_over_SA(rule_iid ,K, Group):
         writer.add_scalars('Accuracy/Test',    {'All Clients': FL_acc[saved_itr]   },clnt_endtime)
         writer.add_scalars('Loss/Test', {'All Clients': FL_loss[saved_itr] }, clnt_endtime)
         writer.add_scalars('LR', {'All Clients': args.local_lr}, clnt_endtime)
-
         #%%---------------------------------回传-------------------------------------------------
+
         if args.Group == 1:
             # Freeze model
             for params in FL_model.parameters():
                 params.requires_grad = False
-            
             clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_model.named_parameters())))
-
         elif args.Group == 2:
             for params in FL_diff_1.parameters():
                 params.requires_grad = False
@@ -387,22 +340,30 @@ def SFL_over_SA(rule_iid ,K, Group):
             elif clnt in idx_diff_2:
                 clnt_models[clnt].load_state_dict(copy.deepcopy(dict(FL_diff_2.named_parameters())))
 
+            sat1 = sum([param.nelement() * param.element_size() for param in FL_diff_1.parameters()])
+            print(f'sat1 param: {sat1}')
+            sat2 = sum([param.nelement() * param.element_size() for param in FL_diff_2.parameters()])
+            print(f'sat1 param: {sat2}')
+            grd = sum([param.nelement() * param.element_size() for param in net_server.parameters()])
+            print(f'grd param: {grd}')
+            print(f'sat1 / grd = {sat1 / grd}')
+            print(f'sat2 / grd = {sat2 / grd}')
+                
+        sats[clnt].recv_iter = server_iter
+
         if idx % 2000 == 0:
             record(FL_acc, FL_loss, FL_acc_trn, FL_loss_trn, args, rule_iid)
-    #%----------------------记录---------------------------------------------------------------
+
     record(FL_acc, FL_loss, FL_acc_trn, FL_loss_trn, args, rule_iid)
-
-    #==========================================   
+                # ==========================================
     print("Training and Evaluation completed!")
-
 
 #%%--------Main-------------------------------------
 #===================================================s
 
 if __name__  == '__main__':
-    for Group_type in [1, 2]:
-        for rule_iid in ['iid', 'Noniid']:
-            for K in [20]:
+    for Group_type in [1]:
+        for rule_iid in ['iid','Noniid']:
+            for K in [1]:
                 SFL_over_SA(rule_iid, K, Group_type)
-
     print('wait for check!')

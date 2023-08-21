@@ -22,6 +22,7 @@ def FedAvg(w):
 def FedAsyncPoly(w_old, w_delta, recv_list, server_iter, args):
     w_buff = copy.deepcopy(w_old)
     for i in range(len(recv_list)):
+        print(f'server_iter-recv_list[i]={server_iter-recv_list[i]}')
         lr = args.async_lr * pow(1 + server_iter - recv_list[i], args.poly_deg)
         for k in w_delta[0].keys():
             w_buff[k] = torch.mul(w_buff[k], 1-lr) + torch.mul(w_delta[i][k], lr)
@@ -168,68 +169,19 @@ def calculate_accuracy_CPU(fx, y):
     # acc = 100.00 *correct.float()/preds.shape[0]
     return acc_bs
 
-#TODO： Server-side function associated with Training 给每一个用户都分配一个server
-def train_server(net_server, fx_client, y, device, lr):
-  
-    net_server = net_server.to(device)
-    net_server.train()
-    # optimizer_server = torch.optim.Adam(net_server.parameters(), lr = lr) 
-    optimizer_server = torch.optim.SGD(net_server.parameters(), lr = lr, weight_decay = 1e-3, momentum = 0.9)#0.9
-    criterion = nn.CrossEntropyLoss(reduction='sum')
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer_server, step_size = 1, gamma = 0.9)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_server, T_max=5)
-
-    # train and update
-    optimizer_server.zero_grad()
-    
-    fx_client = fx_client.to(device)
-    y = y.to(device)
-    
-    #---------forward prop-------------
-    fx_server = net_server(fx_client)
-    
-    # calculate loss
-    loss = criterion(fx_server+1e-8,y.reshape(-1).long())
-    loss = loss/list(y.size())[0]
-
-    assert torch.isnan(loss).sum() == 0, print(loss)
-    # calculate accuracy
-    # acc = calculate_accuracy(fx_server, y)
-    # acc = calculate_accuracy_CPU(fx_server, y)
-    
-    #--------backward prop--------------
-    loss.backward()
-    dfx_client = fx_client.grad.clone().detach()
-    torch.nn.utils.clip_grad_norm_(parameters=net_server.parameters(), max_norm=1)#10,5,3
-    optimizer_server.step()   
-    # print("'Server-side LR: %.4f' "%(scheduler.get_lr()[0]))      
-    #     
-    scheduler.step()    
-
-    net_server.eval()
-    for params in net_server.parameters():
-        params.required_grad = False
-
-    return net_server, dfx_client
-
-
-def evaluate_server_V2(fx_client, y, net_server, device):
+def evaluate_server_V2(fx_client, y, device):
 
     loss_fn = torch.nn.CrossEntropyLoss(reduction='sum')
-    net = copy.deepcopy(net_server).to(device)
-    net.eval()
     with torch.no_grad():
         fx_client = fx_client.to(device)
         y = y.to(device)
-        #--- forward prop ---
-        fx_server = net(fx_client)
         #--- loss and acc ---
-        loss = loss_fn(fx_server+1e-8,y.reshape(-1).long())
+        loss = loss_fn(fx_client+1e-8,y.reshape(-1).long())
         # loss = loss/list(y.size())[0]
-        acc_test = calculate_accuracy_CPU(fx_server,y)
+        acc_test = calculate_accuracy_CPU(fx_client, y)
     return loss, acc_test
 
-def evaluate(net, dataset_tst, dataset_tst_label, net_server, device):
+def evaluate(net, dataset_tst, dataset_tst_label, device):
 
     acc_overall = 0; loss_overall = 0
     batch_size = min(1000, dataset_tst.shape[0])#选择batch_size小于2000
@@ -248,17 +200,17 @@ def evaluate(net, dataset_tst, dataset_tst_label, net_server, device):
             labels = labels.to(device)
             fx = net(images)
             # Sending activations to server 
-            loss_tmp, acc_tmp = evaluate_server_V2(fx, labels, net_server, device)
+            loss_tmp, acc_tmp = evaluate_server_V2(fx, labels, device)
 
             loss_overall += loss_tmp.item()
             acc_overall += acc_tmp.item()
 
     loss_overall /= n_tst
     w_decay = 1e-3 #TODO:w_decay修改
-    if w_decay != None:
-        # Add L2 loss
-        params = get_mdl_params([net], n_par=None)
-        loss_overall += w_decay/2 * np.sum(params * params)
+    # if w_decay != None:
+    #     # Add L2 loss
+    #     params = get_mdl_params([net], n_par=None)
+    #     loss_overall += w_decay/2 * np.sum(params * params)
         
     net.train()
     # acc_overall = acc_overall / (count_tst+1)

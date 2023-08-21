@@ -49,9 +49,7 @@ class DatasetObject:
             
             if self.dataset == 'CIFAR10':
                 print(self.dataset)
-                transform = transforms.Compose([transforms.RandomCrop(32, padding=4),
-                                                transforms.RandomHorizontalFlip(),
-                                                transforms.ToTensor(),
+                transform = transforms.Compose([transforms.ToTensor(),
                                                 transforms.Normalize(mean=[0.491, 0.482, 0.447], std=[0.247, 0.243, 0.262])])
 
                 trainset = torchvision.datasets.CIFAR10(root='%sData/Raw' %self.data_path,

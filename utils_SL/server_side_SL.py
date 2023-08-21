@@ -193,17 +193,12 @@ def train_server(net_server, fx_client, y, device, lr):
     loss = loss/list(y.size())[0]
 
     assert torch.isnan(loss).sum() == 0, print(loss)
-    # calculate accuracy
-    # acc = calculate_accuracy(fx_server, y)
-    # acc = calculate_accuracy_CPU(fx_server, y)
     
     #--------backward prop--------------
     loss.backward()
     dfx_client = fx_client.grad.clone().detach()
     torch.nn.utils.clip_grad_norm_(parameters=net_server.parameters(), max_norm=1)#10,5,3
-    optimizer_server.step()   
-    # print("'Server-side LR: %.4f' "%(scheduler.get_lr()[0]))      
-    #     
+    optimizer_server.step()     
     scheduler.step()    
 
     net_server.eval()
@@ -211,7 +206,6 @@ def train_server(net_server, fx_client, y, device, lr):
         params.required_grad = False
 
     return net_server, dfx_client
-
 
 def evaluate_server_V2(fx_client, y, net_server, device):
 

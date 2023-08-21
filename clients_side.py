@@ -130,8 +130,8 @@ class Client(object):
             params.requires_grad = False
 
         self.net.eval()
-        # return net.state_dict(), self.AN_net.state_dict(), smashed_data, local_labels, self.AN_loss_train, self.AN_acc_train
-        return self.net.state_dict(), self.AN_net.state_dict(), smashed_list, self.AN_loss_train, self.AN_acc_train
+
+        return self.net.state_dict(), self.AN_net.state_dict(), smashed_list
 
     def train_AN(self, smashed_data, labels, AN_net):
         self.AN_net = AN_net
