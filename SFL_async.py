@@ -87,12 +87,12 @@ def SFL_over_SA(rule_iid ,K, Group):
     #     clnt_model_func = lambda: CNNmnist_client_side()
     if args.dataset =='Cifar10' or 'CIFAR10':
         # 原始对比方案，别乱删
-        # clnt_model_same = lambda: VGG16_client_same()
-        # server_model_same = lambda: VGG16_server_same()
+        clnt_model_same = lambda: VGG16_client_same()
+        server_model_same = lambda: VGG16_server_same()
 
         # 相同分割 切割4层
-        clnt_model_same = lambda: VGG16_client_same2()
-        server_model_same = lambda: VGG16_server_same2()
+        # clnt_model_same = lambda: VGG16_client_same2()
+        # server_model_same = lambda: VGG16_server_same2()
 
         clnt_model_diff_1 = lambda: VGG16_client_diff_1()
         clnt_model_diff_2 = lambda: VGG16_client_diff_2()
@@ -116,16 +116,16 @@ def SFL_over_SA(rule_iid ,K, Group):
     if args.Group == 1: # 同分割
         init_net_client_same = clnt_model_same()
         # pretrain
-        load_pretrained(init_net_client_same, {x:x for x in [0, 2, 5, 7]}, 'features')
+        load_pretrained(init_net_client_same, {x:x for x in [0, 2]}, 'features')
 
         FL_model = clnt_model_same()
         FL_model.load_state_dict(copy.deepcopy(dict(init_net_client_same.named_parameters())))
         # 原始对比方案，别乱删
-        # AN_model_func = lambda: ANet_same()
-        AN_model_func = lambda: ANet_same2()
+        AN_model_func = lambda: ANet_same()
+        # AN_model_func = lambda: ANet_same2()
 
         net_server = server_model_same()
-        load_pretrained(net_server, {x:x-10 for x in [10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
+        load_pretrained(net_server, {x:x-5 for x in [5, 7, 10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
         load_pretrained(net_server, {x:x for x in [0, 3]}, 'classifier')
         # pretrain
         

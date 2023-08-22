@@ -1,4 +1,4 @@
-day_list = [120, 180];
+day_list = [15];
 for day = day_list
     startTime = datetime(2023, 6, 1, 00, 00, 0);
     stopTime = startTime + days(day);
@@ -10,7 +10,7 @@ for day = day_list
     lon = 121.4737;
     gs = groundStation(sc, lat, lon);
     
-    height = 550e3; % m
+    height = 1100e3; % m
     R_earth = 6.37814e+06; % m
     radius = height + R_earth; % m
     inc = 53;
@@ -23,6 +23,6 @@ for day = day_list
     ac = access(sat, gs);
     intvls = accessIntervals(ac);
     intvls = sortrows(intvls, 5);
-    file_name = [num2str(total_sat), 'SA_' , num2str(day), 'DAY', '_endtime', '.csv'];
+    file_name = [num2str(total_sat), 'SA_' , num2str(day), 'DAY', '_endtime', '_1100km', '.csv'];
     writetable(intvls, file_name);
 end

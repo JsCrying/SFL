@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = '0, 1, 4, 5, 6, 7'
+os.environ["CUDA_VISIBLE_DEVICES"] = '5, 6, 7'
 import sys
 from path import Path
 import numpy as np
@@ -87,8 +87,13 @@ def SFL_over_SA(rule_iid ,K, Group):
     # if args.dataset == 'mnist':
     #     clnt_model_func = lambda: CNNmnist_client_side()
     if args.dataset =='Cifar10' or 'CIFAR10':
+        # 原始对比方案，别乱删
         clnt_model_same = lambda: VGG16_client_same()
         server_model_same = lambda: VGG16_server_same()
+
+        # 相同分割 切割4层
+        # clnt_model_same = lambda: VGG16_client_same2()
+        # server_model_same = lambda: VGG16_server_same2()
 
         clnt_model_diff_1 = lambda: VGG16_client_diff_1()
         clnt_model_diff_2 = lambda: VGG16_client_diff_2()
@@ -113,6 +118,9 @@ def SFL_over_SA(rule_iid ,K, Group):
 
         FL_model = clnt_model_same()
         FL_model.load_state_dict(copy.deepcopy(dict(init_net_client_same.named_parameters())))
+        # 原始对比方案，别乱删
+        AN_model_func = lambda: ANet_same()
+        # AN_model_func = lambda: ANet_same2()
 
         net_server = server_model_same()
         load_pretrained(net_server, {x:x-5 for x in [5, 7, 10, 12, 14, 17, 19, 21, 24, 26, 28]}, 'features')
@@ -252,14 +260,14 @@ def SFL_over_SA(rule_iid ,K, Group):
             dataset_tst_label = cent_y , net_server = copy.deepcopy(net_server).to(device), device = device)
         # [loss_trn, window_loss_trn] = calc_avg(loss_trn, window_loss_trn)
         # [acc_trn, window_acc_trn] = calc_avg(acc_trn, window_acc_trn)  
-        if clnt in idx_diff_1:
-            window_loss_trn_1 = loss_trn
-            window_acc_trn_1 = acc_trn
-        elif clnt in idx_diff_2:
-            window_loss_trn_2 = loss_trn
-            window_acc_trn_2 = acc_trn
-        loss_trn = (window_loss_trn_1 + window_loss_trn_2) / 2.0
-        acc_trn = (window_acc_trn_1 + window_acc_trn_2) / 2.0               
+        # if clnt in idx_diff_1:
+        #     window_loss_trn_1 = loss_trn
+        #     window_acc_trn_1 = acc_trn
+        # elif clnt in idx_diff_2:
+        #     window_loss_trn_2 = loss_trn
+        #     window_acc_trn_2 = acc_trn
+        # loss_trn = (window_loss_trn_1 + window_loss_trn_2) / 2.0
+        # acc_trn = (window_acc_trn_1 + window_acc_trn_2) / 2.0               
         print("'Split Iteration %3d','loss_train: %.4f', 'acc_trn: %.4f'" % ( iter, loss_trn, acc_trn))      
         FL_acc_trn.append(acc_trn)
         FL_loss_trn.append(loss_trn)       
@@ -270,14 +278,14 @@ def SFL_over_SA(rule_iid ,K, Group):
         [loss_tst, acc_tst] = evaluate(net = FL_test, 
             dataset_tst = data_obj.test_x, 
             dataset_tst_label = data_obj.test_y , net_server = copy.deepcopy(net_server).to(device), device = device)
-        if clnt in idx_diff_1:
-            window_loss_tst_1 = loss_tst
-            window_acc_tst_1 = acc_tst
-        elif clnt in idx_diff_2:
-            window_loss_tst_2 = loss_tst
-            window_acc_tst_2 = acc_tst
-        loss_tst = (window_loss_tst_1 + window_loss_tst_2) / 2.0
-        acc_tst = (window_acc_tst_1 + window_acc_tst_2) / 2.0   
+        # if clnt in idx_diff_1:
+        #     window_loss_tst_1 = loss_tst
+        #     window_acc_tst_1 = acc_tst
+        # elif clnt in idx_diff_2:
+        #     window_loss_tst_2 = loss_tst
+        #     window_acc_tst_2 = acc_tst
+        # loss_tst = (window_loss_tst_1 + window_loss_tst_2) / 2.0
+        # acc_tst = (window_acc_tst_1 + window_acc_tst_2) / 2.0   
         # [loss_tst, window_loss_tst] = calc_avg(loss_tst, window_loss_tst)
         # [acc_tst, window_acc_tst] = calc_avg(acc_tst, window_acc_tst)                    
         print("'Split Iteration %3d', 'loss_tst: %.4f', 'acc_tst: %.4f' "%(iter, loss_tst, acc_tst))      
@@ -300,7 +308,7 @@ def SFL_over_SA(rule_iid ,K, Group):
 #===================================================s
 
 if __name__  == '__main__':
-    for Group_type in [2]:
+    for Group_type in [1]:
         for rule_iid in ['iid', 'Noniid']:
             for K in [1]:
                 SFL_over_SA(rule_iid, K, Group_type)

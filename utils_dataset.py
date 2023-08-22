@@ -17,8 +17,7 @@ def dataset_iid(dataset, num_users):
     for i in range(num_users):
         dict_users[i] = set(np.random.choice(all_idxs, num_items, replace = False))
         all_idxs = list(set(all_idxs) - dict_users[i])
-    return dict_users    
-                          
+    return dict_users                   
 
 class DatasetObject:
     def __init__(self, dataset, n_client, seed, rule, rule_arg, unbalanced_sgm=0,data_path =''):#similarity代替rule_arg
@@ -86,7 +85,12 @@ class DatasetObject:
             n_data_per_clnt = int((len(train_y)) / self.n_client)
             # Draw from lognormal distribution
             clnt_data_list = (np.random.lognormal(mean=np.log(n_data_per_clnt), sigma=self.unbalanced_sgm, size=self.n_client))
+            # print(f'clnt_data_list: {clnt_data_list}')
             clnt_data_list = (clnt_data_list/np.sum(clnt_data_list)*len(train_y)).astype(int)
+            # print(f'clnt_data_list: {clnt_data_list}')
+
+            clnt_data_list = (np.array([1550 + a * 100 for a in range(20)])).astype(int)
+            print(f'sum(clnt_data_list) = {sum(clnt_data_list)}')
             diff = np.sum(clnt_data_list) - len(train_y)
             
             # Add/Subtract the excess number starting from first client
@@ -149,6 +153,12 @@ class DatasetObject:
                 train_x = train_x[idx] # 50000*3*32*32
                 train_y = train_y[idx]
                 n_cls_sample_per_device = n_data_per_clnt // 100
+                # print(f'shape of clnt_x: {clnt_x.shape}')
+                # print(f'shape of clnt_y: {clnt_y.shape}')
+                # print(f'shape of train_x: {train_x.shape}')
+                # print(f'shape of train_y: {train_y.shape}')
+                # print(f'n_data_per_clnt = {n_data_per_clnt}')
+                # print(f'n_cls_sample_per_device = {n_cls_sample_per_device}')
                 for i in range(self.n_client): # devices
                     for j in range(100): # class
                         clnt_x[i, n_cls_sample_per_device*j:n_cls_sample_per_device*(j+1), :, :, :] = train_x[500*j+n_cls_sample_per_device*i:500*j+n_cls_sample_per_device*(i+1), :, :, :]
@@ -160,7 +170,9 @@ class DatasetObject:
                 clnt_x = [ np.zeros((clnt_data_list[clnt__], self.channels, self.height, self.width)).astype(np.float32) for clnt__ in range(self.n_client) ]
                 clnt_y = [ np.zeros((clnt_data_list[clnt__], 1)).astype(np.int64) for clnt__ in range(self.n_client) ]
             
-                clnt_data_list_cum_sum = np.concatenate(([0], np.cumsum(clnt_data_list)))
+                clnt_data_list_cum_sum = np.concatenate(([0], np.cumsum(clnt_data_list))) # 要修改每个卫星拿到的数量，改clnt_data_list就行
+                print(clnt_data_list_cum_sum)
+                print(f'clnt_data_list_cum_sum shape: {clnt_data_list_cum_sum.shape}')
                 for clnt_idx_ in range(self.n_client):
                     clnt_x[clnt_idx_] = train_x[clnt_data_list_cum_sum[clnt_idx_]:clnt_data_list_cum_sum[clnt_idx_+1]]
                     clnt_y[clnt_idx_] = train_y[clnt_data_list_cum_sum[clnt_idx_]:clnt_data_list_cum_sum[clnt_idx_+1]]
